@@ -1,0 +1,85 @@
+tname = false
+function Initialize( tableName )
+	if tname then error"Cannot re-initialize." end
+	tableName = tableName or "eTable"
+	-- Create a new table for elements to be stored.
+	_G[tableName] = {}
+	tname = _G[tableName]
+	return tableName
+end
+
+function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, stc, sbg, secText, group )
+	if not tname then
+		error"Called create before Initialize. Call API Initialize first!"
+	end
+	new = {}
+	setmetatable( new, {__index = self} )
+	new.text = text or "No Text"
+	new.x = x or 1
+	new.y = y or 1
+	new.width = width or #new.text
+	new.height = height or 1
+	new.tc = tc or colors.white
+	new.bg = bg or colors.red
+	new.otc = otc or colors.white
+	new.obg = obg or colors.black
+	new.toggle = toggle or false
+	new.stc = stc or new.tc
+	new.sbg = sbg or new.sbg
+	new.secText = secText or new.text
+	new.group = group
+	new.callback = callback or function() end
+	new.toggled = false
+	new.toggle = function( self )
+		-- Toggle visibility of element
+	end
+	new.hide = function( self )
+		-- Hide element
+	end
+	new.show = function( self )
+		-- Show element
+	end
+	new.groupSelect = function( self, group )
+		-- Returns table of elements with a e.group matching [group]
+	end
+	new.remove = function( self )
+		-- Removes element from draw buffer and replaces old space with obg
+	end
+	new.draw = function( self )
+		-- Draw this element
+		term.setCursorPos( self.x, self.y )
+		if self.toggled then
+			-- This element should use secondary vars
+			term.setTextColor( self.stc )
+			term.setBackgroundColor( self.sbg )
+			term.write( secText )
+		else
+			term.setTextColor( self.tc )
+			term.setBackgroundColor( self.bg )
+			term.write( text )
+		end
+		term.setTextColor( self.otc )
+		term.setBackgroundColor( self.obg )
+		return self -- Allows chaining of functions (like jQuery)
+	end
+	new.addToDict = function( self )
+		for k, v in ipairs( tname ) do
+			if v == self then
+				-- Remove from Dictionary
+				table.remove( tname, k )
+			end
+		end
+		table.insert( tname, self )
+		print( tname )
+		return self
+	end
+	return new
+end
+
+function redrawAll()
+	-- Redraws all elements, returns true if successful, else false
+	if not tname then error"redrawAll called before Initialize. Call API Initialize first!" end
+	for k, v in ipairs( tname ) do
+		print( v )
+	end
+end

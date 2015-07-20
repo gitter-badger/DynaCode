@@ -34,6 +34,11 @@ session = {
 
 	}
 }]]
+os.loadAPI("element")
+element.Initialize()
+btn = element.create("My button", 1, 1):draw():addToDict()
+print( btn )
+
 
 drawing = {
 	termX, termY = term.getSize(),
@@ -57,28 +62,29 @@ log = {
 	},
 	Initialise = function()
 		-- Start the log file
-		self.output( "i", "--== Cap Bank V0.2 ==--" )
-		self.output( "i", "     LOG follows:      " )
-		self.newline()
+		log.output( "i", "--== Cap Bank V0.2 ==--" )
+		log.output( "i", "     LOG follows:      " )
+		log.newline()
 	end,
 	newline = function()
-		self.output("i", " \n ")
+		log.output("i", " \n ")
 	end,
 	output = function( type, text )
-		if config.enabled then
-			local f = fs.open(config.location, "w")
+		if log.config.enabled then
+			local f = fs.open(log.config.location, "w")
 			local msg = "Info"
 			if not type or type == "e" then
 				msg = "FATAL"
 			elseif type == "w" then
 				msg = "Warning"
 			end
-			text = "[".._G.runningProgram.."] [" ..msg.. "]" .. text
+			text = "[".._G.runningProgram.."] [" ..msg.. "] " .. text
 			f.write( text )
 			f.close()
 		end
 	end
 }
+log.Initialise()
 
 helpers = {
 	shorten = function(text, limit)
@@ -98,22 +104,34 @@ function regMonitor( side )
 	new.draw = function( self, text, y, x )
 		print( self.wrap )
 		if peripheral.isPresent(self.side) and peripheral.getType(self.side) == "monitor" and self.wrap then
-			self.wrap.write( side )
-			local mX, mY = self.getDim()
-			print( mY )
+			local mX, mY = self:getDim()
 			-- we have the dimensions of a monitor, write text to this on y if not out of range. if text too long then shorten
 			if mY < y then
-				log.output("w", "Monitor Y is too small")
+				log.output("w", "Monitor "..self.side.."s X dimension is not big enough")
 				-- Output an error message to the monitor
-				wrap.write("Too Small!")
+				self.cout("Too Small", true, 1, 1)
 			elseif mX < x or (x+#text) > mX then
-				log.output("w", "Monitor X is too small")
-				wrap.write("Too Small")
+				log.output("w", "Monitor "..self.side.."s Y dimension is not big enough")
+				self:cout("Too Small", true, 1, 1)
+			else
+				self:cout( text, true, x, y )
 			end
 		end
 	end
-	new.getDim = function()
-		return new.wrap.getSize()
+	new.cout = function( self, text, clear, x, y )
+		x = x or 1
+		y = y or 1
+		text = text or ""
+		clear = clear or false
+		if clear then
+			self.wrap.clear()
+		end
+		self.wrap.setCursorPos( x, y )
+		self.wrap.write( text )
+	end
+	new.getDim = function(self)
+		print("FOUND: "..self.wrap.getSize())
+		return self.wrap.getSize()
 	end
 	new.check = function()
 		-- First check if the peripheral is still there.
@@ -136,6 +154,11 @@ function start()
 	--Start the program, first connect to monitors and store them in a table
 	connectMonitors()
 	connectBank()
+	eventRegister("terminate", function(e) print"What are you up to mate?" sleep(1) os.reboot() end)
+	eventRegister("mouse_click", doClick )
+	updateMon()
+	element.redrawAll()
+	eventLoop()
 end
 
 function connectBank()
@@ -159,7 +182,6 @@ function connectMonitors()
 	-- We have got all peripherals, check each one. If its type is monitor then store it.
 	for per, side in ipairs( peripherals ) do
 		if per and side then
-			print("found peripheral on side: " .. side )
 			if peripheral.getType(side) == "monitor" then
 				print( side )
 				r = true
@@ -202,7 +224,6 @@ function updateMon( stats )
 	for i, v in ipairs( session.mons ) do
 		local msg = "Monitor Connected ("..i..")"
 		v:draw(msg, 2, 1)
-		print("drawing "..msg.." on "..v.side)
 	end
 end
 
@@ -230,5 +251,12 @@ function eventLoop()
 	end
 end
 
-start()
-updateMon()
+local _, err = pcall( start )
+term.clear()
+term.setCursorPos(1, 1)
+term.setTextColor(colors.red)
+term.setBackgroundColor(colors.black)
+print("Unexpected error occured, rebooting in 5 seconds")
+print(err)
+sleep(5)
+os.reboot()
