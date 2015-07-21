@@ -18,8 +18,10 @@ _G.runningProgram = shell.getRunningProgram()
 session = {
 	mons = {},
 	cap = false,
-	capwrap = false
+	wrap = false
 }
+
+--term.setBackgroundColor(colors.white)
 
 --[[color = {
 	returnFilter = function( color )
@@ -34,20 +36,37 @@ session = {
 
 	}
 }]]
-os.loadAPI("element")
-element.Initialize()
-btn = element.create("My button", 1, 1):draw():addToDict()
-print( btn )
+--os.loadAPI("element")
+--element.Initialize()
+--btn = element.create("My button", 5, 5, function() print(drawing) end):draw()
+
+local function config()
+
+	local function welcome()
+	end
+
+	local function amountOfCap()
+
+	end
+
+	local function finish()
+
+
+	end
+
+end
 
 
 drawing = {
-	termX, termY = term.getSize(),
 	drawCentre = function ( text, y, bg, tc )
 		-- body
-		draw( text, y, math.floor(termX/2-(#text/2)), bg, tc ) -- Use draw to make text centered
+		termX, termY = term.getSize()
+		drawing.draw( text, y, math.floor(termX/2-(#text/2)), bg, tc ) -- Use draw to make text centered
 	end,
 	draw = function ( text, y, x, bg, tc )
 		term.setCursorPos( x, y )
+		helpers.tc( tc )
+		helpers.bg( bg )
 		term.write( text )
 	end,
 	color = function() 
@@ -62,23 +81,28 @@ log = {
 	},
 	Initialise = function()
 		-- Start the log file
-		log.output( "i", "--== Cap Bank V0.2 ==--" )
+		log.output( "i", "--== Cap Bank V0.2 ==--", true )
 		log.output( "i", "     LOG follows:      " )
 		log.newline()
 	end,
 	newline = function()
-		log.output("i", " \n ")
+		log.output("i", "\n")
 	end,
-	output = function( type, text )
+	output = function( type, text, rewrite )
 		if log.config.enabled then
-			local f = fs.open(log.config.location, "w")
+			local f
+			if rewrite then 
+				f = fs.open( log.config.location, "w")
+			else
+				f = fs.open( log.config.location, "a")
+			end
 			local msg = "Info"
 			if not type or type == "e" then
 				msg = "FATAL"
 			elseif type == "w" then
 				msg = "Warning"
 			end
-			text = "[".._G.runningProgram.."] [" ..msg.. "] " .. text
+			text = "[".._G.runningProgram.."] [" ..msg.. "] " .. text .."\n"
 			f.write( text )
 			f.close()
 		end
@@ -89,6 +113,25 @@ log.Initialise()
 helpers = {
 	shorten = function(text, limit)
 		-- Reduce text size by replace middle of string with "..."
+		if #text > limit then
+			local extraLength = #text-limit
+			local fHalf = text:sub( 0, #text/2 )
+			local sHalf = text:sub( #text/2 )
+			sHalf:sub( #sHalf + 5 + extraLength )
+			print(": "..extraLength)
+			return fHalf .. " ... " .. sHalf
+		else
+			return text
+		end
+	end,
+	bg = function( bg )
+		term.setBackgroundColor( bg )
+	end,
+	tc = function( tc )
+		term.setTextColor( tc )
+	end,
+	pos = function( x, y )
+		term.setCursorPos( x, y )
 	end
 }
 
@@ -154,8 +197,8 @@ function start()
 	--Start the program, first connect to monitors and store them in a table
 	connectMonitors()
 	connectBank()
-	eventRegister("terminate", function(e) print"What are you up to mate?" sleep(1) os.reboot() end)
-	eventRegister("mouse_click", doClick )
+	eventRegister("terminate", function(e) print(e .. ". Rebooting") sleep(1) os.reboot() end)
+	eventRegister("mouse_click", element.click )
 	updateMon()
 	element.redrawAll()
 	eventLoop()
@@ -250,6 +293,8 @@ function eventLoop()
 		end
 	end
 end
+--[[
+drawing.drawCentre("Hey There!", 2, colors.white, colors.blue)
 
 local _, err = pcall( start )
 term.clear()
@@ -259,4 +304,6 @@ term.setBackgroundColor(colors.black)
 print("Unexpected error occured, rebooting in 5 seconds")
 print(err)
 sleep(5)
-os.reboot()
+os.reboot()]]
+
+print( helpers.shorten("Hey there, this text is longer than my limit and I need to be shortened", 10) ) 

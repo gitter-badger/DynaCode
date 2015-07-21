@@ -8,7 +8,7 @@ function Initialize( tableName )
 	return tableName
 end
 
-function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, stc, sbg, secText, group )
+function create( text, x, y, callback, width, height, padding, tc, bg, otc, obg, toggle, stc, sbg, secText, group )
 	if not tname then
 		error"Called create before Initialize. Call API Initialize first!"
 	end
@@ -19,6 +19,7 @@ function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, 
 	new.y = y or 1
 	new.width = width or #new.text
 	new.height = height or 1
+	new.padding = padding or 5
 	new.tc = tc or colors.white
 	new.bg = bg or colors.red
 	new.otc = otc or colors.white
@@ -30,14 +31,24 @@ function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, 
 	new.group = group
 	new.callback = callback or function() end
 	new.toggled = false
+	new.visible = true
 	new.toggle = function( self )
-		-- Toggle visibility of element
+		-- Toggle click state of element
+		if self.toggled then self.toggled = false else self.toggled = true end
+		return self:draw()
+	end
+	new.toggleShow = function( self )
+		if self.visible then self:hide() else self:show() end
 	end
 	new.hide = function( self )
 		-- Hide element
+		self.visible = false
+		return self:draw()
 	end
 	new.show = function( self )
 		-- Show element
+		self.visible = true
+		return self:draw()
 	end
 	new.groupSelect = function( self, group )
 		-- Returns table of elements with a e.group matching [group]
@@ -48,19 +59,37 @@ function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, 
 	new.draw = function( self )
 		-- Draw this element
 		term.setCursorPos( self.x, self.y )
-		if self.toggled then
-			-- This element should use secondary vars
-			term.setTextColor( self.stc )
-			term.setBackgroundColor( self.sbg )
-			term.write( secText )
+		if self.visible then
+			if self.toggled then
+				-- This element should use secondary vars
+				term.setTextColor( self.stc )
+				term.setBackgroundColor( self.sbg )
+				self:drawPadding()
+				term.write( self.secText )
+			else
+				term.setTextColor( self.tc )
+				term.setBackgroundColor( self.bg )
+				self:drawPadding()
+				term.write( self.text )
+			end
 		else
-			term.setTextColor( self.tc )
-			term.setBackgroundColor( self.bg )
-			term.write( text )
+			local text = false
+			if self.toggled then text = self.secText else text = self.text end
+			term.setBackgroundColor( self.obg )
+			self:drawPadding()
+			term.write( self.text )
+			-- Remove from window
 		end
+		self:drawPadding()
 		term.setTextColor( self.otc )
 		term.setBackgroundColor( self.obg )
 		return self -- Allows chaining of functions (like jQuery)
+	end
+	new.drawPadding = function( self )
+		-- Draw padding
+		for i = 1, self.padding do
+			term.write(" ")
+		end
 	end
 	new.addToDict = function( self )
 		for k, v in ipairs( tname ) do
@@ -73,6 +102,7 @@ function create( text, x, y, width, height, tc, bg, otc, obg, callback, toggle, 
 		print( tname )
 		return self
 	end
+	new:addToDict()
 	return new
 end
 
@@ -83,3 +113,18 @@ function redrawAll()
 		print( v )
 	end
 end
+
+function click( e, button, x, y )
+	-- Check if click location was on a button. If it was run the callback attached.
+	if e == "mouse_click" then
+		if x and y then
+			-- Loop through elements and find a button at the location
+			for i, v in ipairs(tname) do
+				if x >= v.x and x < v.x + v.width + v.padding*2 and y >= v.y and y <= v.y+v.height-1 then
+					v.callback()
+				end
+			end
+		end
+	end
+end
+
