@@ -12,9 +12,6 @@
 	Tested on 1.63 and 1.74
 ]]
 
-
-
-
 function clone( ID, callback, options )
 	local defaults = { --If an element cannot find a variable in itself(self), the passed settings(self.options) or the instance settings(options) then it will fallback to these (defaults)
 		allowTerminate = false,
@@ -148,6 +145,11 @@ function clone( ID, callback, options )
 					self:drawPadding()
 					term.write( text )
 				end
+			end
+			if self.canBeToggled and self.toggled then
+				self.width = #self.toggleText+self.padding*2
+			else
+				self.width = #self.text+self.padding*2
 			end
 			self:drawPadding() 
 			term.setTextColor( self.defaultTextColor )

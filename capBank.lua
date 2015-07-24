@@ -24,6 +24,7 @@ session = {
 --term.setBackgroundColor(colors.white)
 os.loadAPI("DynaGraphic")
 cv = DynaGraphic.clone("capbank")
+cv.log.Initialise()
 
 tc = cv.helpers.tc
 bg = cv.helpers.bg
@@ -76,14 +77,14 @@ local function config()
 		term.setCursorBlink( false )
 		cv.hideAll()
 		cls()
-		cv.textLine({
+		headline = cv.textLine({
 			text = "Saving settings...",
 			y = 6,
 			center = true,
 			backgroundColor = gc("white"),
 			textColor = gc("orange")
 		}):bufferAdd()
-		cv.textBlock({
+		body = cv.textBlock({
 			lines = {
 				"Thanks for configuring Circum Capacitor Bank",
 				"",
@@ -94,6 +95,17 @@ local function config()
 			backgroundColor = gc("white"),
 			textColor = gc("gray")
 		}):bufferAdd()
+		-- Save setting to file
+		--cv.file.write("capbank.cfg", textutils.serialize(set), "w")
+		headline.text = "Settings Saved"
+		body.lines = {
+			"Click 'Continue' to get started!"
+		}
+		primary.text = "Continue"
+		primary.onclick = function() os.reboot() end
+		cv.buffer.drawBuffer()
+		primary.x = termX - primary.width
+		primary:show()
 	end
 
 	capamount = cv.input({
@@ -132,8 +144,8 @@ local function config()
 		enabled = true,
 		backgroundColor = gc("orange")
 	}):bufferAdd()
-
-	primary.x = termX - primary.width/2 - primary.padding
+	cv.buffer.drawBuffer()
+	primary.x = termX - primary.width
 	cv.startEventLoop(function() 
 		welcome()
 	end) -- Start event loop
