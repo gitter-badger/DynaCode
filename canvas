@@ -1,0 +1,769 @@
+--[[
+	<name> Framework
+
+	Copyright Harry Felton (c) 2015
+
+	The <name> framework is used by all major HexCode programs.
+	http://github.com/hbomb79/<name>
+
+	It is created with developers in mind, allowing for easy, simple object oriented, buffer controlled GUI creation in computercraft.
+
+	This framework is for ComputerCraft (1.6+).
+	Tested on 1.63 and 1.74
+]]
+
+
+
+
+function clone( ID, callback, options )
+	local defaults = { --If an element cannot find a variable in itself(self), the passed settings(self.options) or the instance settings(options) then it will fallback to these (defaults)
+		allowTerminate = false,
+		toggle = function( self )
+			-- Toggle click state of element
+			if self.toggled then self.toggled = false else self.toggled = true end
+			return self
+		end,
+		toggleEnabled = function( self )
+			if self.enabled then self.enabled = false else self.enabled = true end
+			return self
+		end,
+		enable = function( self )
+			self.enabled = true
+			return self
+		end,
+		disable = function( self )
+			self.enabled = false
+			return self
+		end,
+		toggleShow = function( self )
+			if self.visible then self:hide() else self:show() end
+		end,
+		hide = function( self )
+			-- Hide element
+			self.visible = false
+			return self
+		end,
+		show = function( self )
+			-- Show element
+			self.visible = true
+			return self
+		end,
+		x = 1,
+		y = 1,
+		padding = 1,
+		width = 10,
+		height = 1,
+		focusable = true,
+		textColor = colors.white,
+		backgroundColor = colors.red,
+		defaultTextColor = colors.gray,
+		defaultBackground = colors.white,
+		enabled = false,
+		visible = false,
+		type = "NONE",
+		text = "NaN",
+		blacklist = false,
+		whitelist = false,
+		toggleText = "NaN",
+		toggleTextColor = colors.white,
+		toggleBackgroundColor = colors.red,
+		limit = 10,
+		zindex = 1,
+		disabledBackgroundColor = colors.lightGray,
+		disabledTextColor = colors.black,
+		onclick = function() end,
+		onsubmit = function() end,
+		onkeyup = function() end,
+		keyError = function() end,
+		focused = false
+
+	}
+	if options then
+		setmetatable( options, {__index=defaults})
+	end
+	if not ID then error"Needs ID to init" end
+	-- Create a new table for elements to be stored.
+	_G[ID] = {}
+	local clone = {}
+	clone.alias={
+	}
+	setmetatable( defaults, {__index=clone.alias})
+	if options then setmetatable( clone, {__index = options} ) else
+		setmetatable( clone, {__index=defaults})
+	end
+	clone.name = _G[ID]
+	clone.groups = {}
+	clone.bufferList = {}
+	clone.customEvents = {}
+	clone.termX, clone.termY = term.getSize()
+	local this = clone
+
+	clone.button = function( options )
+		if not options or not options.name then 
+			error"Cannot Initialize button without name" 
+		end
+		setmetatable( options, {__index = this})
+		if not options.name then
+			error"Called create before Initialize. Call API Initialize first!"
+		end
+		local new = {}
+		setmetatable( new, {__index = options} )
+		new.type = "button"
+		new.getLongest = function( self )
+			if #self.text >= #self.toggleText then 
+				return self.text 
+			else 
+				return self.toggleText 
+			end
+		end
+		new.groupSelect = function( self, group )
+			-- Returns table of elements with a e.group matching [group]
+		end
+		new.draw = function( self )
+			-- Draw this element
+			oldX, oldY = term.getCursorPos()
+			term.setCursorPos( self.x, self.y )
+			this.drawing.drawStraight(self.x, self.y, self.x + #self.getLongest( self ) + self.padding, self.defaultBackground)
+			if self.visible then
+				--error( self.enabled )
+				if self.enabled then
+					if self.toggled then
+						-- This element should use secondary vars
+						term.setTextColor( self.toggleTextColor )
+						term.setBackgroundColor( self.toggleBackgroundColor )
+						self:drawPadding()
+						term.write( self.toggleText )
+					else
+						term.setTextColor( self.textColor )
+						term.setBackgroundColor( self.backgroundColor )
+						self:drawPadding()
+						term.write( self.text )
+					end
+				elseif not self.enabled then
+					-- not enabled
+					local text = false
+					if self.toggled then text = self.toggleText else text = self.text end
+					this.drawing.drawStraight(self.x, self.y, self.x+#text, self.disabledBackgroundColor)
+					term.setTextColor( self.disabledTextColor )
+					self:drawPadding()
+					term.write( text )
+				end
+			end
+			self:drawPadding() 
+			term.setTextColor( self.defaultTextColor )
+			term.setBackgroundColor(self.defaultBackground)
+			term.setCursorPos( oldX, oldY )
+			return self -- Allows chaining of functions (like jQuery)
+		end
+		new.drawPadding = function( self )
+			-- Draw padding
+			for i = 1, self.padding do
+				term.write(" ")
+			end
+			return self
+		end
+		if this.addToBufferOnCreation then new:bufferAdd() end
+		new:addToDict()
+		return new
+	end
+
+	clone.addToDict = function( self )
+		for k, v in ipairs( this.name ) do
+			if v == self then
+				-- Remove from Dictionary
+				table.remove( this.name, k )
+			end
+		end
+		table.insert( this.name, self )
+	end
+
+	clone.bufferAdd = function( self )
+		this.buffer.addToBuffer( self )
+		return self
+	end
+	clone.bufferDraw = function( self )
+		this.buffer.drawBuffer()
+		return self
+	end
+	clone.bufferRemove = function( self )
+		this.buffer.removeFromBuffer( self )
+		return self
+	end
+
+	clone.input = function( options )
+		if not options.name then error"Cannot Initialize input without name" end
+		setmetatable( options, { __index = this } ) -- If an option is not set in new, it will look in options. if its not there it will then look in clone (super)
+		local new = {}
+		setmetatable( new, {__index = options})
+		new.typed = options.typed or ""
+		new.type = "input"
+		new.focused = false
+		new.keyup = function ( self, e, key )
+			-- User pressed key, if this field is active add text to buffer and write on screen
+			if not self.enabled or not self.visible or not self.focused then return self end
+			term.setCursorBlink(true)
+	        if e=="char" then
+	        	if not self:isKeyAllowed( key ) then
+	        		self:keyError( key )
+	        		return self:bufferDraw()
+	        	end
+	            if #self.typed < options.limit then
+	                self.typed = self.typed .. key
+	                term.write(options.replaceChar or key)
+	            end
+	            if #self.typed >= options.limit then term.setCursorBlink(false) end
+	        elseif e=="key" and key==keys.backspace and #self.typed > 0 then
+	            self.typed = self.typed:sub(1,#self.typed-1)
+	            local x,y = term.getCursorPos()
+	            term.setCursorPos(x-1,y)
+	            term.write(" ")
+	            term.setCursorPos(x-1,y)
+	        elseif e=="key" and key==keys.enter and #self.typed > 0 then
+	        	-- Submit the input
+	        	self:blur()
+	        	if self.onsubmit then self:onsubmit() end
+	        end
+	        if self.onkeyup then self:onkeyup( key ) end
+	        return self
+		end
+		new.draw = function( self )
+			-- Draw GUI
+			oldX, oldY = term.getCursorPos()
+			term.setCursorPos( self.x, self.y )
+			this.drawing.drawStraight(self.x, self.y, self.x+self.limit - 1, self.defaultBackground)
+			if self.visible then
+				-- Draw text from buffer
+				if self.enabled then
+					this.drawing.drawStraight( self.x, self.y, self.x + self.limit - 1, self.backgroundColor)
+					-- Draw cursor...
+					term.setTextColor( self.textColor )
+					write( self.typed )
+					if #self.typed >= self.limit then term.setCursorBlink( false ) else term.setCursorBlink( true ) end
+					if not self.focused then
+						term.setCursorBlink( false )
+					end
+				elseif not self.enabled then
+					term.setTextColor( self.disabledTextColor )
+					term.setCursorBlink( false )
+					this.drawing.drawStraight( self.x, self.y, self.x + self.limit - 1, self.disabledBackgroundColor)
+					write( self.typed )
+				end
+			else
+				term.setTextColor( self.defaultTextColor )
+				term.setBackgroundColor( self.defaultBackground )
+			end
+			return self
+		end
+		new.isKeyAllowed = function( self, char )
+			local tbl = false
+			local bl = false
+			local wl = false
+			if self.blacklist then
+				tbl = self.blacklist
+				bl = true
+			elseif self.whitelist then
+				tbl = self.whitelist
+				wl = true
+			else return true end
+			for i, v in pairs(tbl) do
+				if v == char then
+					if wl then
+						return true
+					else return false end
+				end
+			end
+			if wl then return false else return true end
+		end
+		new.focus = function( self )
+			self.focused = true
+			return self
+		end
+		new.blur = function( self )
+			self.focused = false
+			return self
+		end
+		if this.addToBufferOnCreation then new:bufferAdd() end
+		new:addToDict()
+		return new
+	end
+
+	clone.redrawAll = function()
+		-- Redraws all elements, returns true if successful, else false
+		if not this.name then error"redrawAll called before Initialize. Call API Initialize first!" end
+		for k, v in ipairs( this.name ) do
+			print( v )
+		end
+	end
+
+	clone.setAlias = function( name, callback )
+		this.alias[name] = callback
+	end
+
+	clone.removeAlias = function( name )
+		this.alias[name] = nil
+	end
+
+	clone.click = function( e, button, x, y )
+		-- Check if click location was on a button. If it was run the callback attached.
+		if e == "mouse_click" then
+			if x and y then
+				-- Loop through elements and find a button at the location
+				local redraw = false
+				for i, v in ipairs(this.name) do
+					if not v.toggled and x >= v.x - v.padding and x < v.x + #v.text + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" or v.toggled and x >= v.x - v.padding and x < v.x + #v.toggleText + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" then
+						if v.enabled and v.visible then
+							if v.canBeToggled then v:toggle() else redraw = true end
+							v:onclick()
+						end						
+					elseif v.type == "input" and v.enabled and v.focusable then
+						if x >= v.x - 1 and x < v.x + v.limit - 1 and y == v.y then 
+							v:focus()
+						else
+							if v.focused then v:blur() end
+						end
+						redraw = true
+					end
+				end
+				if redraw then
+					this.buffer.drawBuffer()
+				end
+			end
+		end
+	end
+
+	clone.eventRegister = function( event, func )
+		-- Create custom event handler
+		if not this.customEvents[event] then
+			this.customEvents[event] = {} --Create a new table space for this event
+		end
+		table.insert(this.customEvents[event], func)
+	end
+
+	clone.eventRemove = function( event )
+		-- remove custom set event handler
+		if this.customEvents[event] then
+			for i, v in ipairs( this.customEvents[event] ) do
+				table.remove( this.customEvents[event], i )
+			end
+		end
+	end
+
+	clone.peripheral = {
+		getAllNames = function( oftype )
+			--[[
+				@return table of sides
+			]]
+			pers = peripheral.getNames()
+			ready = {}
+			for i, v in pairs( pers ) do
+				if oftype then
+					if peripheral.getType( v ) == oftype then
+						table.insert( ready, v )
+					end
+				else
+					table.insert( ready, v )
+				end
+			end
+			return ready
+		end,
+		getAllWraps = function( oftype )
+			--[[
+				@return table of wraps (for group setting) of all sides (wraps every peripheral that matches @param oftype)
+			]]
+			pers = peripheral.getNames()
+			ready = {}
+			for i, v in pairs( pers ) do
+				if oftype then
+					if peripheral.getType( v ) == oftype then
+						table.insert( ready, peripheral.wrap(v) )
+					end
+				else
+					table.insert( ready, peripheral.wrap(v) )
+				end
+			end
+			return ready
+		end,
+		getWrap = function( side, typeof )
+			if typeof and peripheral.getType( side ) == typeof or not typeof and peripheral.isPresent(side) then
+				return peripheral.wrap( side )
+			else
+				return false
+			end
+		end,
+		setGroup = function( wraps, name )
+			--[[
+				creates a group of peripheral wraps saved with name. Can be accessed with get group
+			]]
+			this.groups[name] = {}
+			for i, v in pairs( wraps ) do
+				table.insert( this.groups[name], v )
+			end
+			return this.groups[name]
+		end,
+		getGroup = function( name )
+			if this.groups[name] then
+				return this.groups[name]
+			else
+				error("No group set with name: "..tostring(name))
+			end
+		end
+	}
+
+	clone.textBlock = function( options )
+		setmetatable( options, {__index=this})
+		local new = {}
+		setmetatable( new, {__index=options})
+
+		new.draw = function( self )
+			--[[
+				Loops through self.lines, writes each line per specification in @param options - @fallback super
+			]]
+			local cl = 0
+			term.setTextColor( self.textColor )
+			term.setBackgroundColor( self.backgroundColor )
+			for i, v in ipairs( self.lines ) do
+				-- Get the line, set cursor position to the next line and write according to options
+				if self.center then
+					term.setCursorPos( math.floor(this.termX/2-#v/2), self.y + cl )
+				else
+					term.setCursorPos( self.x, self.y + cl )
+				end
+				write( v )
+				cl = cl + 1
+			end
+			term.setBackgroundColor( self.defaultBackground )
+			term.setTextColor( self.defaultTextColor )
+		end
+
+		new:addToDict()
+		if this.addToBufferOnCreation then new:bufferAdd() end
+		return new
+	end
+
+	clone.textLine = function( options )
+		setmetatable( options, {__index=this})
+		local new = {}
+		setmetatable( new, {__index=options})
+
+		new.draw = function( self )
+			term.setTextColor( self.textColor )
+			term.setBackgroundColor( self.backgroundColor )
+			if self.center then
+				term.setCursorPos( math.floor(this.termX/2-#self.text/2), self.y )
+			else
+				term.setCursorPos( self.x, self.y )
+			end
+			write( self.text )
+			term.setBackgroundColor( self.defaultBackground )
+			term.setTextColor( self.defaultTextColor )
+		end
+
+		new:addToDict()
+		if this.addToBufferOnCreation then new:bufferAdd() end
+		return new
+	end
+
+
+	clone.buffer = {
+		--[[
+			Add elements to a draw buffer.
+			Every time a change happens to the buffer, it will be resorted and drawn.
+	
+			Each element must contain a zindex property, or else the buffer will default to 1.
+
+			If text is wanted in the buffer, the this.text object must be used instead
+
+		]]
+		drawBuffer = function()
+
+			len = 0
+			order = {}
+			for _, tbl in pairs( this.bufferList ) do
+				len = len + 1
+				order[len] = tbl
+			end
+			for i = #order, 1, -1 do
+				for k,v in pairs( order[i] ) do
+					order[i][k]:draw()
+				end
+			end
+		end,
+		addToBuffer = function( content )
+			if not content or not content.zindex then error(tostring(content).." cannot be added to the buffer") end
+			if content.zindex < 1 then error( "zindex of "..tostring( content.name ).." must be greater than 0") end
+			if not this.bufferList[ content.zindex ] then
+				-- Create a new table to store the elements inside of.
+				this.bufferList[ content.zindex ] = {}
+			end
+			table.insert(this.bufferList[content.zindex], content)
+			--error( this.bufferList[content.zindex][1].zindex )
+		end,
+		removeFromBuffer = function( name )
+			for i = 0, #this.bufferList do
+				for i, v in ipairs( this.bufferList[i] ) do
+					if v.name == name then
+						table.remove( this.bufferList[i], i )
+					end
+				end
+			end
+		end
+	}
+
+	clone.monitor = {
+		drawTo = function( wrap, text, x, y )
+			--[[
+				@param self = hexcode(wrap)
+			]]
+			wrap.setCursorPos( x, y )
+			wrap.write( text )
+		end,
+		drawToGroup = function( group, text, x, y )
+			--[[
+				@param self = peripheral.getGroup OR table of wraps
+			]]
+			for i, v in ipairs( group ) do
+				this.monitor.drawTo( group, text, x, y )
+			end
+		end,
+		drawToGroupCentered = function( group, text, y)
+			-- First, get the monX and monY value
+			for i, v in ipairs( group ) do
+				v.clear()
+				monX, monY = v.getSize()
+				if #text <= monX and y <= monY then
+					center = math.floor( monX/2-(#text/2) )
+					this.monitor.drawTo( v, text, center, y )
+				end
+			end
+		end
+	}
+
+	clone.drawing = {
+		drawArea = function( startX, startY, width, height, color )
+			if width <= 0 or height <= 0 then 
+				this.drawing.drawDot( startX, startY, color )
+			else
+				for y = 0, height do
+					this.drawing.drawStraight( startX, startY+y, startX+width, color )
+				end
+			end
+		end,
+		drawDot = function( x, y, color )
+			local oldX, oldY = term.getCursorPos()
+			term.setCursorPos( x, y )
+			term.setBackgroundColor( color )
+			write(" ")
+			term.setCursorPos( oldX, oldY )
+		end,
+		drawStraight = function( startX, y, endX, tcolor )
+			local oldX, oldY = term.getCursorPos()
+			paintutils.drawLine( startX, y, endX, y, tcolor )
+			term.setCursorPos( oldX, oldY )
+		end,
+		drawCentre = function ( text, y, tc, bg )
+			-- body
+			local termX, termY = term.getSize()
+			text = this.helpers.shorten( text, termX )
+			this.drawing.draw( text, y, math.floor(termX/2-(#text/2)), tc, bg ) -- Use draw to make text centered
+		end,
+		draw = function ( text, y, x, tc, bg )
+			if tc then this.helpers.tc( tc ) end
+			if bg then this.helpers.bg( bg ) end
+			term.setCursorPos( x, y )
+			term.clearLine()
+			term.write( text )
+		end
+	}
+
+	clone.filters = {
+		default = "normal",
+		invert = {
+
+		},
+		normal = {
+			white = colors.white,
+			orange = colors.orange,
+			magenta = colors.magenta,
+			lightBlue = colors.lightBlue,
+			yellow = colors.yellow,
+			lime = colors.lime,
+			pink = colors.pink,
+			gray = colors.gray,
+			lightGray = colors.lightGray,
+			cyan = colors.cyan,
+			purple = colors.purple,
+			brown = colors.brown,
+			blue = colors.blue,
+			green = colors.green,
+			red = colors.red,
+			black = colors.black
+		},
+		highlight = {
+
+		},
+		grayscale = {
+			white = colors.white,
+			orange = colors.lightGray,
+			magenta = colors.gray,
+			lightBlue = colors.lightGray,
+			yellow = colors.white,
+			lime = colors.white,
+			pink = colors.lightGray,
+			gray = colors.gray,
+			lightGray = colors.lightGray,
+			cyan = colors.gray,
+			purple = colors.gray,
+			brown = colors.black,
+			green = colors.lightGray,
+			red = colors.gray,
+			black = colors.black
+		}
+	}
+
+	clone.log = {
+		config = {
+			enabled = true,
+			location = "systemLog.log"
+		},
+		Initialise = function()
+			-- Start the log file
+			this.log.output( "i", "--== Cap Bank V0.2 ==--", true )
+			this.log.output( "i", "     LOG follows:      \n" )
+		end,
+		output = function( type, text, rewrite )
+			if this.log.config.enabled then
+				local f
+				if rewrite then 
+					f = fs.open( this.log.config.location, "w")
+				else
+					f = fs.open( this.log.config.location, "a")
+				end
+				local msg = "Info"
+				if not type or type == "e" then
+					msg = "FATAL"
+				elseif type == "w" then
+					msg = "Warning"
+				end
+				text = "[".._G.runningProgram.."] [" ..msg.. "] " .. text .."\n"
+				f.write( text )
+				f.close()
+			end
+		end
+	}
+
+	clone.helpers = {
+		shorten = function(text, limit)
+			-- Reduce text size by replace middle of string with "..."
+			if #text > limit then
+				local extraLength = #text-limit
+				local fHalf = text:sub( 0, math.floor(#text/2-1-extraLength/2) )
+				local sHalf = text:sub( math.floor(#text/2+1) )
+				sHalf = sHalf:sub( (#sHalf - 5 - extraLength/2) * -1 )
+				return fHalf .. " ... " .. sHalf
+			else
+				return text
+			end
+		end,
+		getFilter = function( name )
+			if name then
+				return this.filters[name]
+			else
+				return this.filters[ this.filters.default ]
+			end
+		end,
+		getColor = function( color, filter )
+			return this.helpers.getFilter(filter)[color]
+		end,
+		bg = function( color, filter )
+			term.setBackgroundColor( this.helpers.getFilter( filter )[color] )
+		end,
+		tc = function( color, filter )
+			term.setTextColor( this.helpers.getFilter( filter )[ color ] )
+		end,
+		pos = function( x, y )
+			term.setCursorPos( x, y )
+		end,
+		clear = function()
+			term.clear()
+		end,
+		waitForEvent = function( event, textfunc, callback )
+			if textfunc then textfunc() end
+			while true do
+				local e, p1, p2, p3, p4, p5, p6 = os.pullEvent()
+				if not event or e == event then
+					if callback then
+						if callback( e, p1, p2, p3, p4, p5, p6 ) then break end
+					else break end
+				end
+			end
+		end
+	}
+
+	clone.file = {
+		write = function( file, content, mode )
+			local f = fs.open( file, mode or "w")
+			f.write( content )
+			f.close()
+		end,
+		read = function( file )
+			local f = fs.open( file, "r" )
+			local content = f.read()
+			f.close()
+			return content
+		end
+	}
+
+	clone.hideAll = function()
+		for k, v in pairs( this.bufferList ) do
+			for i, obj in pairs( this.bufferList[k] ) do
+				obj:hide()
+			end
+		end
+		this.buffer.drawBuffer()
+	end
+
+	clone.removeAll = function()
+		this.bufferList = {}
+	end
+
+	clone.startEventLoop = function( callback )
+		-- Start loop, run callback
+		if this.allowTerminate then
+			this.eventRegister("terminate", function(event)
+				this.stopEventLoop()
+				error("Terminated Program")
+			end)
+		end
+		if callback then callback() end
+		while true do
+			local event, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
+			if event == "cancel_loop" then
+				break
+			elseif event == "mouse_click" then
+				this.click( event, p1, p2, p3 )
+			elseif event == "char" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+				end
+			elseif event == "key" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+				end
+			end
+			-- Check if custom event
+			if this.customEvents[event] then
+				for i, e in ipairs(this.customEvents[event]) do
+					-- If multiple
+					e(event, p1, p2, p3, p4, p5, p6)
+				end
+			end
+		end
+	end
+	clone.stopEventLoop = function( callback )
+		-- Stop event loop, code after this is run in the program will execute.
+		os.queueEvent("cancel_loop")
+		if callback then callback() end
+	end
+	if callback then callback() end
+	return clone
+end
