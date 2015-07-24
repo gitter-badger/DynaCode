@@ -22,8 +22,8 @@ session = {
 }
 
 --term.setBackgroundColor(colors.white)
-os.loadAPI("canvas")
-cv = canvas.clone("capbank")
+os.loadAPI("DynaGraphic")
+cv = DynaGraphic.clone("capbank")
 
 tc = cv.helpers.tc
 bg = cv.helpers.bg
@@ -201,7 +201,7 @@ function start()
 	connectMonitors()
 	connectBank()
 	updateMon()
-	canvas.redrawAll()
+	cv.redrawAll()
 	eventLoop()
 end
 
@@ -362,5 +362,5 @@ cv.peripheral.setGroup( cv.peripheral.getAllWraps("monitor"), "test_group")
 
 cv.monitor.drawToGroupCentered( cv.peripheral.getGroup("test_group"), "Monitor test", 5)
 
-local _, err = pcall(loadSettings, canvas)
+local _, err = pcall(loadSettings)
 error( err, 4)
