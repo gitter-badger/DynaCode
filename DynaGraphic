@@ -1,10 +1,10 @@
 --[[
-	<name> Framework
+	DynaGraphic Framework
 
 	Copyright Harry Felton (c) 2015
 
-	The <name> framework is used by all major HexCode programs.
-	http://github.com/hbomb79/<name>
+	The DynaGraphic framework is used by all major HexCode programs.
+	http://github.com/hbomb79/DynaGraphic
 
 	It is created with developers in mind, allowing for easy, simple object oriented, buffer controlled GUI creation in computercraft.
 
@@ -15,6 +15,8 @@
 function clone( ID, callback, options )
 	local defaults = { --If an element cannot find a variable in itself(self), the passed settings(self.options) or the instance settings(options) then it will fallback to these (defaults)
 		allowTerminate = false,
+		addToBufferOnCreation = false,
+		protected = true, -- Prevents laggy operations
 		toggle = function( self )
 			-- Toggle click state of element
 			if self.toggled then self.toggled = false else self.toggled = true end
@@ -45,6 +47,12 @@ function clone( ID, callback, options )
 			self.visible = true
 			return self
 		end,
+		onredraw = function( self )
+
+		end,
+		beforeRedraw = function( self )
+
+		end,
 		x = 1,
 		y = 1,
 		padding = 1,
@@ -55,8 +63,8 @@ function clone( ID, callback, options )
 		backgroundColor = colors.red,
 		defaultTextColor = colors.gray,
 		defaultBackground = colors.white,
-		enabled = false,
-		visible = false,
+		enabled = true,
+		visible = true,
 		type = "NONE",
 		text = "NaN",
 		blacklist = false,
@@ -88,6 +96,7 @@ function clone( ID, callback, options )
 	if options then setmetatable( clone, {__index = options} ) else
 		setmetatable( clone, {__index=defaults})
 	end
+	clone.timers = {}
 	clone.name = _G[ID]
 	clone.groups = {}
 	clone.bufferList = {}
@@ -119,6 +128,12 @@ function clone( ID, callback, options )
 		new.draw = function( self )
 			-- Draw this element
 			oldX, oldY = term.getCursorPos()
+			if self.canBeToggled and self.toggled then
+				self.width = #self.toggleText+self.padding*2
+			else
+				self.width = #self.text+self.padding*2
+			end
+			if self.beforeRedraw then self:beforeRedraw() end
 			term.setCursorPos( self.x, self.y )
 			this.drawing.drawStraight(self.x, self.y, self.x + #self.getLongest( self ) + self.padding, self.defaultBackground)
 			if self.visible then
@@ -146,15 +161,11 @@ function clone( ID, callback, options )
 					term.write( text )
 				end
 			end
-			if self.canBeToggled and self.toggled then
-				self.width = #self.toggleText+self.padding*2
-			else
-				self.width = #self.text+self.padding*2
-			end
 			self:drawPadding() 
 			term.setTextColor( self.defaultTextColor )
 			term.setBackgroundColor(self.defaultBackground)
 			term.setCursorPos( oldX, oldY )
+			if self.onredraw then self:onredraw() end
 			return self -- Allows chaining of functions (like jQuery)
 		end
 		new.drawPadding = function( self )
@@ -254,6 +265,7 @@ function clone( ID, callback, options )
 				term.setTextColor( self.defaultTextColor )
 				term.setBackgroundColor( self.defaultBackground )
 			end
+			if self.onredraw then self:onredraw() end
 			return self
 		end
 		new.isKeyAllowed = function( self, char )
@@ -288,15 +300,6 @@ function clone( ID, callback, options )
 		new:addToDict()
 		return new
 	end
-
-	clone.redrawAll = function()
-		-- Redraws all elements, returns true if successful, else false
-		if not this.name then error"redrawAll called before Initialize. Call API Initialize first!" end
-		for k, v in ipairs( this.name ) do
-			print( v )
-		end
-	end
-
 	clone.setAlias = function( name, callback )
 		this.alias[name] = callback
 	end
@@ -317,7 +320,7 @@ function clone( ID, callback, options )
 							if v.canBeToggled then v:toggle() else redraw = true end
 							v:onclick()
 						end						
-					elseif v.type == "input" and v.enabled and v.focusable then
+					elseif v.type == "input" and v.enabled and v.visible and v.focusable then
 						if x >= v.x - 1 and x < v.x + v.limit - 1 and y == v.y then 
 							v:focus()
 						else
@@ -420,6 +423,7 @@ function clone( ID, callback, options )
 			--[[
 				Loops through self.lines, writes each line per specification in @param options - @fallback super
 			]]
+			if not self.visible or not self.enabled then return self end
 			local cl = 0
 			term.setTextColor( self.textColor )
 			term.setBackgroundColor( self.backgroundColor )
@@ -435,6 +439,8 @@ function clone( ID, callback, options )
 			end
 			term.setBackgroundColor( self.defaultBackground )
 			term.setTextColor( self.defaultTextColor )
+			if self.onredraw then self:onredraw() end
+			return self
 		end
 
 		new:addToDict()
@@ -458,6 +464,8 @@ function clone( ID, callback, options )
 			write( self.text )
 			term.setBackgroundColor( self.defaultBackground )
 			term.setTextColor( self.defaultTextColor )
+			if self.onredraw then self:onredraw() end
+			return self
 		end
 
 		new:addToDict()
@@ -516,6 +524,10 @@ function clone( ID, callback, options )
 			--[[
 				@param self = hexcode(wrap)
 			]]
+			monX, monY = wrap.getSize()
+			if x > monX or y > monY then
+				error("too small to write on")
+			end
 			wrap.setCursorPos( x, y )
 			wrap.write( text )
 		end,
@@ -530,14 +542,28 @@ function clone( ID, callback, options )
 		drawToGroupCentered = function( group, text, y)
 			-- First, get the monX and monY value
 			for i, v in ipairs( group ) do
-				v.clear()
+				--v.clear()
 				monX, monY = v.getSize()
-				if #text <= monX and y <= monY then
-					center = math.floor( monX/2-(#text/2) )
-					this.monitor.drawTo( v, text, center, y )
-				end
+				center = math.floor( monX/2-(#text/2) )
+				this.monitor.drawTo( v, text, center, y )
+			end
+		end,
+		clearGroup = function( group )
+			for k, v in ipairs( group ) do
+				v.clear()
+			end
+		end,
+		backgroundColorGroup = function( group, bg )
+			for k, v in ipairs( group ) do
+				v.setBackgroundColor( bg )
+			end
+		end,
+		textColorGroup = function( group, tc )
+			for k, v in ipairs( group ) do
+				v.setTextColor( tc )
 			end
 		end
+
 	}
 
 	clone.drawing = {
@@ -709,7 +735,7 @@ function clone( ID, callback, options )
 		end,
 		read = function( file )
 			local f = fs.open( file, "r" )
-			local content = f.read()
+			content = f.readAll()
 			f.close()
 			return content
 		end
@@ -726,6 +752,31 @@ function clone( ID, callback, options )
 
 	clone.removeAll = function()
 		this.bufferList = {}
+	end
+
+	clone.setTimer = function( nm, duration, callback, rp )
+		-- make timer, insert name into table for use later
+		if duration <= 0.3 then
+			if this.protected then
+				error"Cannot create timer: The duration is too low. Increase duration"
+			end
+		end
+		this.stopTimer( nm ) --Removes any timers with the same name
+		this.timers[ os.startTimer( duration ) ] = {
+			duration = duration,
+			oncomplete = callback,
+			rp = rp,
+			name = nm
+		}
+	end
+
+	clone.stopTimer = function( name )
+		for k, v in pairs( this.timers ) do
+			if v.name == name then
+				os.cancelTimer( k )
+				if v.rp then v.rp = false end
+			end
+		end
 	end
 
 	clone.startEventLoop = function( callback )
@@ -750,6 +801,16 @@ function clone( ID, callback, options )
 			elseif event == "key" then
 				for i, v in ipairs( this.name ) do
 					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+				end
+			elseif event == "timer" then
+				-- Check if timer is in timer table
+				if this.timers[p1] then
+					tmr = this.timers[p1]
+					tmr:oncomplete()
+					if tmr.rp then --tmr.rp is set false by this.stopTimer( p1 )
+						-- restart timer
+						this.setTimer( tmr.name, tmr.duration, tmr.oncomplete, tmr.rp )
+					end
 				end
 			end
 			-- Check if custom event

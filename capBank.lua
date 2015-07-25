@@ -3,12 +3,9 @@
 
 	The program utilises methods exposed by openP:
 	 - getEnergyStored()
-	 - getAdvancedMethodsData()
 	 - getMaxEnergyStored()
-	 - doc()
-	 - listMethods()
 
-	Every 0.5secs the program will use the wrapped peripheral to gather information about the energy cell. This information will then be
+	Every 0.5secs (10 ticks) the program will use the wrapped peripheral to gather information about the energy cell. This information will then be
 	multiplied by the amount of capacitors in the multi block.
 
 ]]
@@ -16,8 +13,6 @@ termX, termY = term.getSize()
 _G.runningProgram = shell.getRunningProgram()
 
 session = {
-	mons = {},
-	cap = false,
 	wrap = false
 }
 
@@ -47,14 +42,6 @@ cout( "Loading File System", 6, "gray" )
 local function config()
 	db( "i", "Starting setup" )
 	set = {}
-	function welcome()
-		cls()
-		primary:bufferAdd():bufferDraw()
-		cout("Circum Capacitor Bank Setup", 6, "orange")
-		cout("To configure the Capacitor Bank program", 10, "gray")
-		cout("please click 'Next'", 11)
-		db( "i", "Welcome page ready" )
-	end
 
 	function amountOfCap()
 		bg("white")
@@ -63,49 +50,54 @@ local function config()
 		primary.onclick = function( self )
 			if #capamount.typed > 0 then
 				set.amount = capamount.typed
-				finish()
+				monitorDisplay()
 			end
 		end
-		cout("How many capacitors are in this bank?", 6, "orange")
-		cout("Due to the way the EnderIO API works", 9, "gray")
-		cout("I need to know how many capacitors", 10)
-		cout("are in this bank.", 11)
-		capamount:bufferAdd():focus()
+		title.text = "How many capacitors are in this bank?"
+		body.lines = {
+			"Due to the way the EnderIO API works",
+			"I need to know how many capacitors",
+			"are in this bank."
+		}
+		capamount:bufferAdd():bufferDraw():focus()
+	end
+
+	function monitorDisplay()
+		bg("white")
+		primary:enable()
+		primary.backgroundColor = gc("lime")
+		primary.text = "Enable"
+		primary.onclick = function() set.monitors = true finish() end
+		primary:draw()
+		secondary.onclick = function() set.monitors = false finish() end
+		secondary:show()
+		capamount:hide()
+		cls()
+		title.text = "Should we display information to monitors"
+		body.lines = {
+			"If this is enabled, any monitors",
+			"attached directly or through wired modems",
+			"will reflect the status of the capacitors",
+			"like the terminal"
+		}
+		term.setCursorBlink( false )
 	end
 
 	function finish()
 		term.setCursorBlink( false )
 		cv.hideAll()
 		cls()
-		headline = cv.textLine({
-			text = "Saving settings...",
-			y = 6,
-			center = true,
-			backgroundColor = gc("white"),
-			textColor = gc("orange")
-		}):bufferAdd()
-		body = cv.textBlock({
-			lines = {
-				"Thanks for configuring Circum Capacitor Bank",
-				"",
-				"We are saving your settings"
-			},
-			center = true,
-			y = 10,
-			backgroundColor = gc("white"),
-			textColor = gc("gray")
-		}):bufferAdd()
-		-- Save setting to file
-		--cv.file.write("capbank.cfg", textutils.serialize(set), "w")
-		headline.text = "Settings Saved"
+		cv.file.write("capBank.cfg", textutils.serialize(set), "w")
+		title.text = "Settings Saved"
 		body.lines = {
 			"Click 'Continue' to get started!"
 		}
+		title:show()
+		body:show()
 		primary.text = "Continue"
 		primary.onclick = function() os.reboot() end
-		cv.buffer.drawBuffer()
-		primary.x = termX - primary.width
 		primary:show()
+		cv:bufferDraw()
 	end
 
 	capamount = cv.input({
@@ -127,12 +119,33 @@ local function config()
 		textColor = gc("orange"),
 		backgroundColor = gc("gray"),
 		limit = 4,
-		y = 13,
+		y = 15,
 		x = termX/2 - 2,
 		whitelist = {
 			"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
 		}
 	})
+
+	title = cv.textLine({
+		text = "Circum Capacitor Bank Setup",
+		center = true,
+		visible = true,
+		y = 6,
+		backgroundColor = gc("white"),
+		textColor = gc("orange")
+	}):bufferAdd()
+
+	body = cv.textBlock({
+		lines = {
+			"To start setting up this program",
+			"click \"Next\""
+		},
+		center = true,
+		visible = true,
+		y = 10,
+		backgroundColor = gc("white"),
+		textColor = gc("gray")
+	}):bufferAdd()
 
 	primary = cv.button({
 		name = "next_button",
@@ -142,126 +155,170 @@ local function config()
 		padding = 1,
 		onclick = function() amountOfCap() end,
 		enabled = true,
-		backgroundColor = gc("orange")
+		backgroundColor = gc("orange"),
+		beforeRedraw = function( self )
+			self.x = termX - primary.width
+		end
 	}):bufferAdd()
-	cv.buffer.drawBuffer()
-	primary.x = termX - primary.width
-	cv.startEventLoop(function() 
-		welcome()
+
+	secondary = cv.button({
+		name = "back_button",
+		text = "Disable",
+		visible = false,
+		y = termY-1,
+		padding = 1,
+		onclick = function() amountOfCap() end,
+		enabled = true,
+		backgroundColor = gc("red"),
+		x = 3
+	}):bufferAdd()
+
+	cv.startEventLoop(function()
+		cls()
+		cv:bufferDraw()
 	end) -- Start event loop
 
 end
 
 --[[Create a new metatable containing functions used by self]]
 
-function regMonitor( side )
-	-- Monitor found, create the meta table and return it.
-	new = {}
-	setmetatable( new, {__index = self} )
-	new.side = side
-	new.label = "monitor"
-	new.wrap = peripheral.wrap( side )
-	new.draw = function( self, text, y, x )
-		if peripheral.isPresent(self.side) and peripheral.getType(self.side) == "monitor" and self.wrap then
-			local mX, mY = self:getDim()
-			-- we have the dimensions of a monitor, write text to this on y if not out of range. if text too long then shorten
-			if mY < y then
-				log.output("w", "Monitor "..self.side.."s X dimension is not big enough")
-				-- Output an error message to the monitor
-				self.cout("Too Small", true, 1, 1)
-			elseif mX < x or (x+#text) > mX then
-				log.output("w", "Monitor "..self.side.."s Y dimension is not big enough")
-				self:cout("Too Small", true, 1, 1)
-			else
-				self:cout( text, true, x, y )
-			end
-		end
-	end
-	new.cout = function( self, text, clear, x, y )
-		x = x or 1
-		y = y or 1
-		text = text or ""
-		clear = clear or false
-		if clear then
-			self.wrap.clear()
-		end
-		self.wrap.setCursorPos( x, y )
-		self.wrap.write( text )
-	end
-	new.getDim = function(self)
-		return self.wrap.getSize()
-	end
-	new.check = function()
-		-- First check if the peripheral is still there.
-		if peripheral.isPresent( new.side ) and peripheral.getType( new.side ) == "monitor" then
-			new.wrap = peripheral.wrap( new.side )
-			-- Rewrapped, check if advanced
-			if new.wrap.isColor() then
-				-- has color
-			else
-				-- no color
-			end
-		else
-			new.wrap = false
-		end
-	end
-	return new
-end
 
-function start() 
+function start()
 	--Start the program, first connect to monitors and store them in a table
-	connectMonitors()
-	connectBank()
-	updateMon()
-	cv.redrawAll()
-	eventLoop()
-end
+	cls()
+	function displayTerm()
+		line = "0"
+		if session.stats.last > 0 and session.stats.last ~= session.stats.current then
+			line = tostring( session.stats.last - session.stats.current )
+		end
+		cls()
+		title.text = "Capacitor information"
+		body.lines = {
+			"",
+			tostring( session.stats["current"].."/"..session.stats["cap"] ),
+			"",
+			"",
+			line
+		}
+	end
 
-function connectBank()
-	-- Find the capacitor bank that the computer is directly connected to
-	local peripherals = peripheral.getNames()
-	for per, side in ipairs( peripherals ) do
-		if per and side then
-			if peripheral.getType( side ) == "tile_capbank" then-- Fake name
-				session.cap = side
-				return true
-			end
+	function displayMon()
+		mon = cv.monitor
+		mons = cv.peripheral.getGroup("monitors")
+		mon.backgroundColorGroup( mons, gc("white"))
+		mon.textColorGroup( mons, gc("orange") )
+		mon.clearGroup( mons )
+		mon.drawToGroupCentered( mons, "TEST", 3 )
+	end
+
+	function update()
+		-- Loop through each wrap, accumulating a total
+		if not powerTitle then
+			powerTitle = cv.textLine({
+				textColor = gc("orange"),
+				backgroundColor = gc("white"),
+				text = "Power Stored / Maximum Power",
+				center = true,
+				y = 13
+			}):bufferAdd()
+			outputTitle = cv.textLine({
+				textColor = gc("orange"),
+				backgroundColor = gc("white"),
+				text = "RF Output Over 10 Ticks",
+				center = true,
+				y=16
+			}):bufferAdd()
+			title.y = 4
+			body.y = body.y + 3
+			subTitle = cv.textBlock({
+				lines = {
+					"Every 10 ticks we are collecting",
+					"data about your capacitors",
+					"",
+					"The information is displayed below;"
+				},
+				center = true,
+				backgroundColor = gc("white"),
+				textColor = gc("lightGray"),
+				y = 6
+			}):bufferAdd()
+		end
+		if not session.stats then
+			session.stats = {}
+		end
+		if session.stats["current"] then
+			session.stats["last"] = session.stats["current"]
+		else
+			session.stats["last"] = 0
+		end
+		session.stats["cap"] = session.wrap[1].getMaxEnergyStored() * session.amount
+		session.stats["current"] = session.wrap[1].getEnergyStored() * session.amount
+		displayTerm()
+		if session.monitors and #cv.peripheral.getGroup("monitors") > 0 then displayMon() end
+	end
+
+	function bankConnect()
+		session.wrap = cv.peripheral.getAllWraps("tile_blockcapacitorbank_name")
+		if #session.wrap < 1 then
+			body.lines = {
+				"No Capacitors Can Be Found",
+				"",
+				"I cannot find any capacitor banks!"
+			}
+		elseif #session.wrap > 1 then
+			body.lines = {
+				"Multiple Capacitors Found",
+				"",
+				"I don't support multiple capacitors yet",
+				"",
+				"Please remove all but one bank"
+			}
+		else
+			-- Get information about the capacitors.
+			title.text = "Connected To Bank"
+			body.lines = {
+				"Retrieving information from capacitors"
+			}
+			cv.setTimer("updatetimer", 0.5, function( self )
+				-- Update monitors and terminal
+				update()
+				cv:bufferDraw()
+			end, true)
 		end
 	end
-	return false
-end
-
-function connectMonitors()
-	-- Find any and all monitors connected via rednet or directly.
-	local peripherals = peripheral.getNames()
-	local r = false
-	-- We have got all peripherals, check each one. If its type is monitor then store it.
-	for per, side in ipairs( peripherals ) do
-		if per and side then
-			if peripheral.getType(side) == "monitor" then
-				r = true
-				table.insert( session.mons, regMonitor( side ) )
-			end
-		end
-	end
-	return r
-end
-
-function settings()
-	local function login()
-
-	end
-
-	local function show()
-
-	end
-end
-
-function update()
-	local stats = {
-		stored = session.wrap.getEnergyStored(),
-		max = session.wrap.getMaxEnergyStored()
-	}
+	cv.startEventLoop(function()
+		cv.eventRegister("peripheral", function()
+			cv.peripheral.setGroup( cv.peripheral.getAllWraps("monitor"), "monitors")
+		end)
+		cv.setTimer("updatetimer", 0, function( self )
+			-- Update monitors and terminal
+			cv:bufferDraw()
+		end, true)
+		cv.addToBufferOnCreation = true
+		-- Program started. Create onscreen text/buttons
+		title = cv.textLine({
+			text="Circum Capacitor Bank",
+			textColor = gc("orange"),
+			backgroundColor = gc("white"),
+			center = true,
+			y = 6
+		})
+		body = cv.textBlock({
+			lines={
+				"Connecting to peripherals",
+				"",
+				"Please Wait..."
+			},
+			center = true,
+			y = 10,
+			textColor = gc("gray"),
+			backgroundColor = gc("white")
+		})
+		cv.addToBufferOnCreation = false
+		bankConnect()
+		cv:bufferDraw()
+		cv.peripheral.setGroup(cv.peripheral.getAllWraps("monitor"), "monitors")
+	end)
 end
 
 function loadSettings()
@@ -269,24 +326,9 @@ function loadSettings()
 		-- No config, launch setup
 		config()
 	else
-		error"Ready"
+		session = textutils.unserialize(cv.file.read("capBank.cfg"))
+		start()
 	end
-end
-
-function saveSettings()
-
-end
-
-function updateMon( stats )
-	-- Update monitor screens with capacitor bank information
-	for i, v in ipairs( session.mons ) do
-		local msg = "Monitor Connected ("..i..")"
-		v:draw(msg, 2, 1)
-	end
-end
-
-function updateTerm( stats )
-	-- Update the terminal window with information if page is "main"
 end
 
 local nativeError = _G.error
@@ -358,6 +400,7 @@ function _G.error(_msg, _level)
 	local ok, err, last = nil, "", os.clock()
 	while true do
 		ok, err = pcall(nativeError, _msg, _level) -- Call the error function repeatedly, each time increasing the level to get the next program in line
+		if not err then nativeError("Unknown Error") end
 		if err:find("^bios") or err:find("^shell") then
 			-- If BIOS or SHELL then stop the stack trace
 			atc("Stacktrace End")
@@ -369,10 +412,6 @@ function _G.error(_msg, _level)
 	end
 	formalError( trace )
 end
-
-cv.peripheral.setGroup( cv.peripheral.getAllWraps("monitor"), "test_group")
-
-cv.monitor.drawToGroupCentered( cv.peripheral.getGroup("test_group"), "Monitor test", 5)
 
 local _, err = pcall(loadSettings)
 error( err, 4)
