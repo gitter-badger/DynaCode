@@ -727,6 +727,26 @@ function clone( ID, callback, options )
 		end
 	}
 
+	clone.remote = {
+		request = function(url)
+			if not http then return false end
+			-- try to connect three times
+			for i=0, 3 do
+				response = http.get( url )
+				return response or false
+			end
+			return false
+		end,
+		getLine = function( url )
+			response = this.remote.request( url )
+			if response then return response.readLine() or false else return false end
+		end,
+		getAll = function( url )
+			response = this.remote.request( url )
+			if response then return response.readAll() or false end return false end
+		end
+	}
+
 	clone.file = {
 		write = function( file, content, mode )
 			local f = fs.open( file, mode or "w")
