@@ -1,9 +1,9 @@
 --[[
-	DynaGraphic Framework
+	DynaCode Framework
 
 	Copyright Harry Felton (c) 2015
 
-	The DynaGraphic framework is used by all major HexCode programs.
+	The DynaCode framework is used by all major HexCode programs.
 	http://github.com/hbomb79/DynaGraphic
 
 	It is created with developers in mind, allowing for easy, simple object oriented, buffer controlled GUI creation in computercraft.
@@ -53,6 +53,8 @@ function clone( ID, callback, options )
 		beforeRedraw = function( self )
 
 		end,
+		scrollBackground = colors.lightGray,
+		scrollColor = colors.gray,
 		x = 1,
 		y = 1,
 		padding = 1,
@@ -69,6 +71,7 @@ function clone( ID, callback, options )
 		text = "NaN",
 		blacklist = false,
 		whitelist = false,
+		scrollBar = true,
 		toggleText = "NaN",
 		toggleTextColor = colors.white,
 		toggleBackgroundColor = colors.red,
@@ -88,7 +91,6 @@ function clone( ID, callback, options )
 	end
 	if not ID then error"Needs ID to init" end
 	-- Create a new table for elements to be stored.
-	_G[ID] = {}
 	local clone = {}
 	clone.alias={
 	}
@@ -97,21 +99,64 @@ function clone( ID, callback, options )
 		setmetatable( clone, {__index=defaults})
 	end
 	clone.timers = {}
-	clone.name = _G[ID]
+	clone.name = {}
 	clone.groups = {}
 	clone.bufferList = {}
 	clone.customEvents = {}
 	clone.termX, clone.termY = term.getSize()
 	local this = clone
 
+
+	--[[
+		Object Declarations
+		 ---===========---
+
+		All objects have the following settings:
+		- @integer x
+		- @integer y
+		- @boolean enabled
+		- @boolean visible
+		- @string name
+		- @integer backgroundColor
+		- @integer textColor
+		- @integer defaultBackground
+		- @integer defaultTextColor
+		- @integer disabledBackgroundColor
+		- @integer disabledTextColor
+
+		All objects have the following callbacks:
+		- onredraw
+	]]
+
+	--[[
+		Object: Button,
+		Parameters: options
+		@options.name required
+		
+		Description:
+		Create an onscreen button at @options.x and @options.y.
+
+		Object Specific Settings:
+		- @integer toggleBackgroundColor
+		- @integer toggleTextColor
+		- @integer padding
+		- @string text
+		- @string toggleText
+		- @boolean canBeToggled
+		- @boolean toggled
+		- @integer width
+		- @integer height
+
+		Object Specific Callbacks:
+		- onclick
+	]]
+
 	clone.button = function( options )
-		if not options or not options.name then 
-			error"Cannot Initialize button without name" 
-		end
+		req, missing = this.checkRequirements( options, {
+			"name"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
 		setmetatable( options, {__index = this})
-		if not options.name then
-			error"Called create before Initialize. Call API Initialize first!"
-		end
 		local new = {}
 		setmetatable( new, {__index = options} )
 		new.type = "button"
@@ -180,31 +225,36 @@ function clone( ID, callback, options )
 		return new
 	end
 
-	clone.addToDict = function( self )
-		for k, v in ipairs( this.name ) do
-			if v == self then
-				-- Remove from Dictionary
-				table.remove( this.name, k )
-			end
-		end
-		table.insert( this.name, self )
-	end
+	--[[
+		Object: Input,
+		Parameters: options
+		@options.name required
+		
+		Description:
+		Create an onscreen text box that can be typed in and submitted using the enter key.
 
-	clone.bufferAdd = function( self )
-		this.buffer.addToBuffer( self )
-		return self
-	end
-	clone.bufferDraw = function( self )
-		this.buffer.drawBuffer()
-		return self
-	end
-	clone.bufferRemove = function( self )
-		this.buffer.removeFromBuffer( self )
-		return self
-	end
+		Object Specific Settings:
+		- @string typed
+		- @boolean focused
+		- @integer padding
+		- @string text
+		- @table white-list
+		- @table black-list
+		- @boolean focusable
+		- @integer limit
+		- @string replaceChar
+
+		Object Specific Callbacks:
+		- onsubmit
+		- onkeyup
+		- keyError
+	]]
 
 	clone.input = function( options )
-		if not options.name then error"Cannot Initialize input without name" end
+		req, missing = this.checkRequirements( options, {
+			"name"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
 		setmetatable( options, { __index = this } ) -- If an option is not set in new, it will look in options. if its not there it will then look in clone (super)
 		local new = {}
 		setmetatable( new, {__index = options})
@@ -300,121 +350,27 @@ function clone( ID, callback, options )
 		new:addToDict()
 		return new
 	end
-	clone.setAlias = function( name, callback )
-		this.alias[name] = callback
-	end
 
-	clone.removeAlias = function( name )
-		this.alias[name] = nil
-	end
+	--[[
+		Object: Text Block,
+		Parameters: options
+		@options.name required
+		
+		Description:
+		Create an onscreen group of text starting at Y
 
-	clone.click = function( e, button, x, y )
-		-- Check if click location was on a button. If it was run the callback attached.
-		if e == "mouse_click" then
-			if x and y then
-				-- Loop through elements and find a button at the location
-				local redraw = false
-				for i, v in ipairs(this.name) do
-					if not v.toggled and x >= v.x - v.padding and x < v.x + #v.text + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" or v.toggled and x >= v.x - v.padding and x < v.x + #v.toggleText + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" then
-						if v.enabled and v.visible then
-							if v.canBeToggled then v:toggle() else redraw = true end
-							v:onclick()
-						end						
-					elseif v.type == "input" and v.enabled and v.visible and v.focusable then
-						if x >= v.x - 1 and x < v.x + v.limit - 1 and y == v.y then 
-							v:focus()
-						else
-							if v.focused then v:blur() end
-						end
-						redraw = true
-					end
-				end
-				if redraw then
-					this.buffer.drawBuffer()
-				end
-			end
-		end
-	end
+		Object Specific Settings:
+		- @table Content
 
-	clone.eventRegister = function( event, func )
-		-- Create custom event handler
-		if not this.customEvents[event] then
-			this.customEvents[event] = {} --Create a new table space for this event
-		end
-		table.insert(this.customEvents[event], func)
-	end
-
-	clone.eventRemove = function( event )
-		-- remove custom set event handler
-		if this.customEvents[event] then
-			for i, v in ipairs( this.customEvents[event] ) do
-				table.remove( this.customEvents[event], i )
-			end
-		end
-	end
-
-	clone.peripheral = {
-		getAllNames = function( oftype )
-			--[[
-				@return table of sides
-			]]
-			pers = peripheral.getNames()
-			ready = {}
-			for i, v in pairs( pers ) do
-				if oftype then
-					if peripheral.getType( v ) == oftype then
-						table.insert( ready, v )
-					end
-				else
-					table.insert( ready, v )
-				end
-			end
-			return ready
-		end,
-		getAllWraps = function( oftype )
-			--[[
-				@return table of wraps (for group setting) of all sides (wraps every peripheral that matches @param oftype)
-			]]
-			pers = peripheral.getNames()
-			ready = {}
-			for i, v in pairs( pers ) do
-				if oftype then
-					if peripheral.getType( v ) == oftype then
-						table.insert( ready, peripheral.wrap(v) )
-					end
-				else
-					table.insert( ready, peripheral.wrap(v) )
-				end
-			end
-			return ready
-		end,
-		getWrap = function( side, typeof )
-			if typeof and peripheral.getType( side ) == typeof or not typeof and peripheral.isPresent(side) then
-				return peripheral.wrap( side )
-			else
-				return false
-			end
-		end,
-		setGroup = function( wraps, name )
-			--[[
-				creates a group of peripheral wraps saved with name. Can be accessed with get group
-			]]
-			this.groups[name] = {}
-			for i, v in pairs( wraps ) do
-				table.insert( this.groups[name], v )
-			end
-			return this.groups[name]
-		end,
-		getGroup = function( name )
-			if this.groups[name] then
-				return this.groups[name]
-			else
-				error("No group set with name: "..tostring(name))
-			end
-		end
-	}
+		Object Specific Callbacks:
+		NONE
+	]]
 
 	clone.textBlock = function( options )
+		req, missing = this.checkRequirements( options, {
+			"lines"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
 		setmetatable( options, {__index=this})
 		local new = {}
 		setmetatable( new, {__index=options})
@@ -448,7 +404,26 @@ function clone( ID, callback, options )
 		return new
 	end
 
+	--[[
+		Object: Text Line,
+		Parameters: options
+		@options.name required
+		
+		Description:
+		Create a line of text
+
+		Object Specific Settings:
+		- @string Text
+
+		Object Specific Callbacks:
+		NONE
+	]]
+
 	clone.textLine = function( options )
+		req, missing = this.checkRequirements( options, {
+			"text"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
 		setmetatable( options, {__index=this})
 		local new = {}
 		setmetatable( new, {__index=options})
@@ -472,6 +447,441 @@ function clone( ID, callback, options )
 		if this.addToBufferOnCreation then new:bufferAdd() end
 		return new
 	end
+
+	--[[
+		Object: Scroll area,
+		Parameters: options
+		@options.name required
+		
+		Description:
+		Creates a scrollable area that can contain string text or buttons
+
+		Object Specific Settings:
+		- @string Text
+		- @integer width
+		- @integer height
+
+		Object Specific Callbacks:
+		NONE
+	]]
+
+	clone.scroll = function( options )
+		req, missing = this.checkRequirements( options, {
+			"name",
+			"content"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
+		setmetatable( options, {__index=this})
+		new = {}
+		new.offset = options.offset or 1
+		new.type = "scroll"
+		setmetatable( new, {__index=options})
+
+		new.draw = function( self )
+			if self.visible and self.enabled then
+				-- Loop through each item in content. If it is in bounds, set to visible=true
+				local ln = 0
+				this.drawing.drawArea( self.x, self.y, self.width-1, self.height-1, self.backgroundColor )
+				term.setTextColor( self.textColor )
+				for k, v in ipairs( self.content ) do
+					if k >= self.offset and k <= self.offset+ln and ( type(v) == "string" or type(v) ~= "string" and v.type == "button" ) then
+						if self.y+ln <= self.y+self.height-1 then
+							if type( v ) == "string" then
+								local cx = self.x
+								if self.center then
+									cx = math.ceil( self.x - 1 + self.width/2-( #v/2 ) )
+								end
+								term.setCursorPos( cx, self.y+ln)
+								ln = ln + 1
+								--if v == "test line7" then print("hit") end
+								write( v .. " :" .. ln )
+							elseif v.type == "button" then
+								-- The element is a button, its Y axis needs to be manipulated for it to scroll correctly
+								v.y = self.y+ln
+								if self.center then
+									v.x = math.ceil( self.x - 1 + self.width / 2 - ( ( #v.text+v.padding ) / 2 ) )
+								else
+									v.x = self.x
+								end
+								v:draw()
+								ln = ln + 1
+							end
+						end
+					elseif v.type == "align" then
+						error"Align objects not supported"
+						-- @k is the index of the align start
+						-- Loop through the align correctly. Do not hide the whole thing if it is out of index.
+						local inc = false
+						for key, value in ipairs( v.content ) do
+							if k + key >= self.offset and ln <= self.height-1 then
+								term.setCursorPos( self.x, self.y+ln )
+								write( value )
+								ln = ln + 1
+								inc = true
+							end
+						end
+					end
+				end
+				self:updateScrollbar()
+			end
+			term.setTextColor( self.defaultTextColor )
+			term.setBackgroundColor( self.defaultBackground )
+		end
+
+		new.updateScrollbar = function( self )
+			if self.scrollBar and #self.content > self.height then
+				-- Calculate new scroll bar position
+				maxoffset = #self.content - self.height + 1
+				if self.offset > maxoffset then self.offset = maxoffset self:draw() return self end
+				height =  math.floor( ( self.height / 100 ) * ( ( self.height / #self.content ) * 100 ) ) -- Get height as result of percentage
+				pos = math.floor( self.offset * ( self.height / #self.content ) )
+				if pos < 1 then pos = 1
+				elseif pos > self.height - height then pos = self.height - height end
+				if height > 0 and maxoffset > 0 then
+					if self.offset >= maxoffset then
+						pos = self.height - height
+					elseif self.offset == 1 then
+						pos = 1
+					elseif pos >= self.height - height then pos = pos - 1
+					elseif pos <= 1 then pos = pos + 1
+					end
+					paintutils.drawLine( self.x+self.width-1, self.y, self.x+self.width-1, self.y+self.height-1, self.scrollBackground)
+					paintutils.drawLine( self.x+self.width-1, self.y+pos-1, self.x+self.width-1, self.y+pos+height-1 , self.scrollColor)
+				end
+			end
+			return self
+		end
+
+		new.onscroll = function( self, event, direction, x, y )
+			-- if x and y are in bounds (user was hovering on scroll area) then increment/decrement the offset
+			if x >= self.x and x <= self.x+self.width and y >= self.y and y <= self.y+self.height-1 then
+				-- In bounds
+				if direction == -1 then
+					-- scrolled up
+					self.offset = self.offset - 1
+					if self.offset < 1 then self.offset = 1 end
+				elseif direction == 1 then
+					-- scrolled down
+					self.offset = self.offset + 1
+					if not self.content[ self.offset + self.height - 1 ] then self.offset = self.offset - 1 end
+					if self.offset > #self.content then self.offset = #self.content end
+				end
+			end
+			self:draw()
+		end
+
+		new.ondrag = function( self, event, x, y )
+			-- Check if dragging down or up..
+			if y == self.y or y == self.y + self.height - 1 then
+				self:onclick( "mouse_click", 1, x, y )
+			elseif x == self.x+self.width - 1 and y >= self.y-1 and y <= self.y+self.height - 1 then
+				if not self.oldY then self.oldY = self.y end
+				drag = y - self.y + 1
+				dragPos = math.floor( ( drag / ( self.height / #self.content ) ) )
+				self.offset = dragPos
+				if self.offset < 1 then 
+					self.offset = 1 
+				elseif not self.content[ self.offset + self.height - 1 ] then 
+					self.offset = #self.content - self.height + 1
+				elseif 
+					self.offset > #self.content then self.offset = #self.content 
+				end
+				self.oldY = y
+				self:draw()
+			end
+		end
+
+		new.onclick = function( self, event, button, x, y )
+			-- Scroll to location. On click get the Y axis. Use this as a percentage, get the same percentage via the same formula as used in updateScrollbar
+			if x == self.x+self.width - 1 then
+				self.oldX, self.oldY = x, y
+				height =  math.floor( ( self.height / 100 ) * ( ( self.height / #self.content ) * 100 ) )
+				clickPos = y - self.y + 1
+				if clickPos == 1 then
+					self.offset = 1
+				elseif clickPos == self.height then
+					self.offset = #self.content - self.height + 1
+				else
+					scrollPos = math.floor( ( clickPos / ( self.height / #self.content ) ) )
+					self.offset = scrollPos
+				end
+				self:draw()
+			end
+		end
+
+		new.checkBoundaries = function( self, element )
+			if element.y < self.y or element.y > self.y+self.height or element.y+element.height > self.y+self.height then
+				return false
+			else return true end
+		end
+		new:bufferAdd()
+		new:addToDict()
+		return new
+	end
+
+
+	clone.scrollAlign = function( options )
+		req, missing = this.checkRequirements( options, {
+			"align",
+			"content"
+		})
+		--error( textutils.serialize( missing ) )
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
+		new = {}
+		new.type = "align"
+		setmetatable( new, {__index = options})
+		setmetatable( options, { __index = this } )
+		return new
+	end
+
+	clone.checkRequirements = function( given, req )
+		if not given then error"No options given for object" end
+		set = {}
+		function inReq( i )
+			for k, v in pairs( req ) do
+				if v == i then return true end
+			end
+			return false
+		end
+
+		function inSet( i )
+			for k, v in pairs( set ) do
+				if v == i then return true end
+			end
+			return false
+		end
+
+		function setMissing()
+			local set = {}
+			for key, value in pairs( req ) do
+				
+				-- Check if KEY provided in @given. If it isn't, then add it to local @set
+				aSet = true
+				for k, v in pairs( given ) do
+					if k == value then aSet = false end
+				end
+				if aSet then table.insert( set, value ) end
+
+			end
+			return set
+		end
+
+		for k,v in pairs( given ) do
+			if inReq( k ) and not inSet( k ) then table.insert( set, k ) end
+		end
+
+		missing = setMissing()
+
+		if #set == #req then
+			return true, {}
+		else return false, missing end
+
+	end
+
+
+	--[[
+		 System Functions
+		---============---
+		
+		The following functions are used by the API, you can also use them by targeting your instance:
+
+		<instance>.[fnName]
+
+	]]
+
+
+
+	clone.eventRegister = function( event, func )
+		-- Create custom event handler
+		if not this.customEvents[event] then
+			this.customEvents[event] = {} --Create a new table space for this event
+		end
+		table.insert(this.customEvents[event], func)
+	end
+
+	clone.eventRemove = function( event )
+		-- remove custom set event handler
+		if this.customEvents[event] then
+			for i, v in ipairs( this.customEvents[event] ) do
+				table.remove( this.customEvents[event], i )
+			end
+		end
+	end
+
+	clone.hideAll = function()
+		for k, v in pairs( this.bufferList ) do
+			for i, obj in pairs( this.bufferList[k] ) do
+				obj:hide()
+			end
+		end
+		this.buffer.drawBuffer()
+	end
+
+	clone.removeAll = function()
+		this.bufferList = {}
+	end
+
+	clone.setTimer = function( nm, duration, callback, rp )
+		-- make timer, insert name into table for use later
+		if duration <= 0.3 then
+			if this.protected then
+				error"Cannot create timer: The duration is too low. Increase duration"
+			end
+		end
+		this.stopTimer( nm ) --Removes any timers with the same name
+		this.timers[ os.startTimer( duration ) ] = {
+			duration = duration,
+			oncomplete = callback,
+			rp = rp,
+			name = nm
+		}
+	end
+
+	clone.stopTimer = function( name )
+		for k, v in pairs( this.timers ) do
+			if v.name == name then
+				os.cancelTimer( k )
+				if v.rp then v.rp = false end
+			end
+		end
+	end
+
+	clone.setAlias = function( name, callback )
+		this.alias[name] = callback
+	end
+
+	clone.removeAlias = function( name )
+		this.alias[name] = nil
+	end
+
+	--[[
+	
+		 System Listeners
+		---============---
+
+		Used by the API to monitor OS events. Should not be called from local instance
+
+	]]
+
+	clone.click = function( e, button, x, y )
+		-- Check if click location was on a button. If it was run the callback attached.
+		if e == "mouse_click" then
+			if x and y then
+				-- Loop through elements and find a button at the location
+				local redraw = false
+				for i, v in ipairs(this.name) do
+					if not v.toggled and x >= v.x - v.padding and x < v.x + #v.text + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" or v.toggled and x >= v.x - v.padding and x < v.x + #v.toggleText + v.padding and y >= v.y and y <= v.y+v.height-1 and v.type == "button" then
+						if v.enabled and v.visible then
+							if v.canBeToggled then v:toggle() else redraw = true end
+							v:onclick()
+						end
+					elseif v.type == "scroll" and v.enabled and v.visible and x >= v.x and x <= v.x+v.width and y >= v.y and y <= v.y+v.height-1 then
+						v:onclick( e, button, x, y )			
+					elseif v.type == "input" and v.enabled and v.visible and v.focusable then
+						if x >= v.x - 1 and x < v.x + v.limit - 1 and y == v.y then 
+							v:focus()
+						else
+							if v.focused then v:blur() end
+						end
+						redraw = true
+					end
+				end
+				if redraw then
+					this.buffer.drawBuffer()
+				end
+			end
+		end
+	end
+
+	--[[
+
+		    System APIs
+		 ---===========---
+	
+		Utilities that you can use to make developing programs easier.
+
+	]]
+
+	clone.addToDict = function( self )
+		for k, v in ipairs( this.name ) do
+			if v == self then
+				-- Remove from Dictionary
+				table.remove( this.name, k )
+			end
+		end
+		table.insert( this.name, self )
+	end
+
+	clone.bufferAdd = function( self )
+		this.buffer.addToBuffer( self )
+		return self
+	end
+	clone.bufferDraw = function( self )
+		this.buffer.drawBuffer()
+		return self
+	end
+	clone.bufferRemove = function( self )
+		this.buffer.removeFromBuffer( self )
+		return self
+	end
+
+	clone.startEventLoop = function( callback )
+		-- Start loop, run callback
+		if this.allowTerminate then
+			this.eventRegister("terminate", function(event)
+				this.stopEventLoop()
+				error("Terminated Program")
+			end)
+		end
+		if callback then callback() end
+		while true do
+			local event, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
+			if event == "cancel_loop" then
+				break
+			elseif event == "mouse_click" then
+				this.click( event, p1, p2, p3 )
+			elseif event == "mouse_scroll" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.visible and v.type == "scroll" then v:onscroll( event, p1, p2, p3 ) end
+				end
+			elseif event == "mouse_drag" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.visible and v.type == "scroll" then v:ondrag( event, p2, p3 ) end
+				end
+			elseif event == "char" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+				end
+			elseif event == "key" then
+				for i, v in ipairs( this.name ) do
+					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+				end
+			elseif event == "timer" then
+				-- Check if timer is in timer table
+				if this.timers[p1] then
+					tmr = this.timers[p1]
+					tmr:oncomplete()
+					if tmr.rp then --tmr.rp is set false by this.stopTimer( p1 )
+						-- restart timer
+						this.setTimer( tmr.name, tmr.duration, tmr.oncomplete, tmr.rp )
+					end
+				end
+			end
+			-- Check if custom event
+			if this.customEvents[event] then
+				for i, e in ipairs(this.customEvents[event]) do
+					-- If multiple
+					e(event, p1, p2, p3, p4, p5, p6)
+				end
+			end
+		end
+	end
+	clone.stopEventLoop = function( callback )
+		-- Stop event loop, code after this is run in the program will execute.
+		os.queueEvent("cancel_loop")
+		if callback then callback() end
+	end
+
 
 
 	clone.buffer = {
@@ -743,110 +1153,94 @@ function clone( ID, callback, options )
 		end,
 		getAll = function( url )
 			response = this.remote.request( url )
-			if response then return response.readAll() or false end return false end
+			if response then return response.readAll() or false else return false end
 		end
 	}
 
 	clone.file = {
 		write = function( file, content, mode )
+			if fs.isDir( file ) then error"Cannot write to directory" end
 			local f = fs.open( file, mode or "w")
 			f.write( content )
 			f.close()
 		end,
-		read = function( file )
+		readAll = function( file )
+			if not fs.exists(file) or fs.exists(file) and fs.isDir(file) then return false end
 			local f = fs.open( file, "r" )
 			content = f.readAll()
+			f.close()
+			return content
+		end,
+		readLine = function( file )
+			if not fs.exists(file) or fs.exists(file) and fs.isDir(file) then return false end
+			local f = fs.open( file, "r" )
+			content = f.readLine()
 			f.close()
 			return content
 		end
 	}
 
-	clone.hideAll = function()
-		for k, v in pairs( this.bufferList ) do
-			for i, obj in pairs( this.bufferList[k] ) do
-				obj:hide()
-			end
-		end
-		this.buffer.drawBuffer()
-	end
-
-	clone.removeAll = function()
-		this.bufferList = {}
-	end
-
-	clone.setTimer = function( nm, duration, callback, rp )
-		-- make timer, insert name into table for use later
-		if duration <= 0.3 then
-			if this.protected then
-				error"Cannot create timer: The duration is too low. Increase duration"
-			end
-		end
-		this.stopTimer( nm ) --Removes any timers with the same name
-		this.timers[ os.startTimer( duration ) ] = {
-			duration = duration,
-			oncomplete = callback,
-			rp = rp,
-			name = nm
-		}
-	end
-
-	clone.stopTimer = function( name )
-		for k, v in pairs( this.timers ) do
-			if v.name == name then
-				os.cancelTimer( k )
-				if v.rp then v.rp = false end
-			end
-		end
-	end
-
-	clone.startEventLoop = function( callback )
-		-- Start loop, run callback
-		if this.allowTerminate then
-			this.eventRegister("terminate", function(event)
-				this.stopEventLoop()
-				error("Terminated Program")
-			end)
-		end
-		if callback then callback() end
-		while true do
-			local event, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
-			if event == "cancel_loop" then
-				break
-			elseif event == "mouse_click" then
-				this.click( event, p1, p2, p3 )
-			elseif event == "char" then
-				for i, v in ipairs( this.name ) do
-					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
-				end
-			elseif event == "key" then
-				for i, v in ipairs( this.name ) do
-					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
-				end
-			elseif event == "timer" then
-				-- Check if timer is in timer table
-				if this.timers[p1] then
-					tmr = this.timers[p1]
-					tmr:oncomplete()
-					if tmr.rp then --tmr.rp is set false by this.stopTimer( p1 )
-						-- restart timer
-						this.setTimer( tmr.name, tmr.duration, tmr.oncomplete, tmr.rp )
+	clone.peripheral = {
+		getAllNames = function( oftype )
+			--[[
+				@return table of sides
+			]]
+			pers = peripheral.getNames()
+			ready = {}
+			for i, v in pairs( pers ) do
+				if oftype then
+					if peripheral.getType( v ) == oftype then
+						table.insert( ready, v )
 					end
+				else
+					table.insert( ready, v )
 				end
 			end
-			-- Check if custom event
-			if this.customEvents[event] then
-				for i, e in ipairs(this.customEvents[event]) do
-					-- If multiple
-					e(event, p1, p2, p3, p4, p5, p6)
+			return ready
+		end,
+		getAllWraps = function( oftype )
+			--[[
+				@return table of wraps (for group setting) of all sides (wraps every peripheral that matches @param oftype)
+			]]
+			pers = peripheral.getNames()
+			ready = {}
+			for i, v in pairs( pers ) do
+				if oftype then
+					if peripheral.getType( v ) == oftype then
+						table.insert( ready, peripheral.wrap(v) )
+					end
+				else
+					table.insert( ready, peripheral.wrap(v) )
 				end
+			end
+			return ready
+		end,
+		getWrap = function( side, typeof )
+			if typeof and peripheral.getType( side ) == typeof or not typeof and peripheral.isPresent(side) then
+				return peripheral.wrap( side )
+			else
+				return false
+			end
+		end,
+		setGroup = function( wraps, name )
+			--[[
+				creates a group of peripheral wraps saved with name. Can be accessed with get group
+			]]
+			this.groups[name] = {}
+			for i, v in pairs( wraps ) do
+				table.insert( this.groups[name], v )
+			end
+			return this.groups[name]
+		end,
+		getGroup = function( name )
+			if this.groups[name] then
+				return this.groups[name]
+			else
+				error("No group set with name: "..tostring(name))
 			end
 		end
-	end
-	clone.stopEventLoop = function( callback )
-		-- Stop event loop, code after this is run in the program will execute.
-		os.queueEvent("cancel_loop")
-		if callback then callback() end
-	end
+	}
+
 	if callback then callback() end
 	return clone
 end
