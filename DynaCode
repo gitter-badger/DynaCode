@@ -1143,7 +1143,7 @@ function clone( ID, callback, options )
 			-- try to connect three times
 			for i=0, 3 do
 				response = http.get( url )
-				return response or false
+				if response then return response end
 			end
 			return false
 		end,
