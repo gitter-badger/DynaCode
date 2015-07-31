@@ -103,6 +103,7 @@ function clone( ID, callback, options )
 	clone.groups = {}
 	clone.bufferList = {}
 	clone.customEvents = {}
+	clone.elementGroups = {}
 	clone.termX, clone.termY = term.getSize()
 	local this = clone
 
@@ -429,6 +430,7 @@ function clone( ID, callback, options )
 		setmetatable( new, {__index=options})
 
 		new.draw = function( self )
+			if not self.visible or not self.enabled then return self end
 			term.setTextColor( self.textColor )
 			term.setBackgroundColor( self.backgroundColor )
 			if self.center then
@@ -436,6 +438,7 @@ function clone( ID, callback, options )
 			else
 				term.setCursorPos( self.x, self.y )
 			end
+			term.clearLine()
 			write( self.text )
 			term.setBackgroundColor( self.defaultBackground )
 			term.setTextColor( self.defaultTextColor )
@@ -465,6 +468,46 @@ function clone( ID, callback, options )
 		NONE
 	]]
 
+	clone.getStringConfig = function( str )
+		if type( str ) ~= "string" then
+			error("Expected @str to be type string, got "..type( str ))
+		end
+		return str:match("%[.*%]") 
+	end
+
+	clone.getStringSetting = function( str, setting )
+
+		str = str:match("%[.*%]")
+		if not str then return false end
+		strTable, strSetting = {}, {}
+		temp_word = str:gmatch("%S+")
+		if not temp_word then return false end
+		for word in temp_word do
+			table.insert( strTable, word )
+		end
+		for k, v in ipairs( strTable ) do
+			start = v:match(".*%S*%=*")
+			if start then
+				-- Remove "[" from start of string if exists.
+				if start:sub(1, 1) == "[" then
+					start = start:sub( 2 )
+				end
+				if start:sub(-1, -1) == "]" then
+					start = start:sub( 1, -2 )
+				end
+				-- Strip from start to "=". If this matches @setting, return the value
+				tSetting = start:match(".*%=")
+				tSetting = tSetting:sub( 1, -2 )
+				if tSetting and tSetting == setting then
+					rSetting = start:sub( #tSetting+2 )
+					return rSetting
+				end
+			end
+		end
+		return false
+
+	end
+
 	clone.scroll = function( options )
 		req, missing = this.checkRequirements( options, {
 			"name",
@@ -487,19 +530,30 @@ function clone( ID, callback, options )
 					if k >= self.offset and k <= self.offset+ln and ( type(v) == "string" or type(v) ~= "string" and v.type == "button" ) then
 						if self.y+ln <= self.y+self.height-1 then
 							if type( v ) == "string" then
+								s = this.getStringSetting( v, "color" )
+								if s then
+									s = s:sub( s:find("%..*") )
+									s = s:sub( 2 )
+									term.setTextColor( colors[s] )
+								else
+									term.setTextColor( self.textColor )
+								end
+								v = v:gsub( "%[.*%]", "" )
+								if v:sub( -1 ) == " " then
+									v = v:sub( 1, -2 )
+								end
 								local cx = self.x
 								if self.center then
-									cx = math.ceil( self.x - 1 + self.width/2-( #v/2 ) )
+									cx = math.ceil( self.x - 1 + self.width/2-( #v/2 ) ) - 1
 								end
 								term.setCursorPos( cx, self.y+ln)
+								write( v )
 								ln = ln + 1
-								--if v == "test line7" then print("hit") end
-								write( v .. " :" .. ln )
 							elseif v.type == "button" then
 								-- The element is a button, its Y axis needs to be manipulated for it to scroll correctly
 								v.y = self.y+ln
 								if self.center then
-									v.x = math.ceil( self.x - 1 + self.width / 2 - ( ( #v.text+v.padding ) / 2 ) )
+									v.x = math.ceil( self.x - self.padding*2 + self.width / 2 - ( ( #v.text+v.padding ) / 2 ) )-1
 								else
 									v.x = self.x
 								end
@@ -802,14 +856,60 @@ function clone( ID, callback, options )
 
 	]]
 
+	clone.group = {
+		create = function( name, content )
+			if type( content ) ~= "table" then
+				error("Invalid Argument, Table expected, got "..type( content ))
+			end
+			this.elementGroups[name] = {}
+			for key, value in pairs( content ) do
+				local fnname = false
+				if type( value ) == "string" then
+					fnname = value
+				elseif type( value ) == "table" then
+					fnname = value.name
+				end
+				table.insert( this.elementGroups[name], fnname )
+			end
+		end,
+		fetch = function( group )
+			return this.elementGroups[ group ] or false
+		end,
+		fetchObject = function( name )
+			for k, v in pairs( this.name ) do
+				if v.name and v.name == name then
+					return this.name[k]
+				end
+			end
+		end,
+		changeSetting = function( group, setting, newValue )
+			-- Change @setting on all elements in @group to @newValue
+			if type( group ) == "string" then
+				group = this.group.fetch( group )
+			end
+			for key, value in pairs( group ) do
+				this.group.fetchObject( value )[setting] = newValue
+			end
+			this.buffer.drawBuffer()
+		end,
+		remove = function( name )
+			for k, v in pairs( this.elementGroups ) do
+				print( k )
+			end
+		end
+	}
+
 	clone.addToDict = function( self )
+		self:removeFromDict()
+		table.insert( this.name, self )
+	end
+
+	clone.removeFromDict = function( self )
 		for k, v in ipairs( this.name ) do
-			if v == self then
-				-- Remove from Dictionary
+			if v.name == self.name then
 				table.remove( this.name, k )
 			end
 		end
-		table.insert( this.name, self )
 	end
 
 	clone.bufferAdd = function( self )
@@ -823,6 +923,14 @@ function clone( ID, callback, options )
 	clone.bufferRemove = function( self )
 		this.buffer.removeFromBuffer( self )
 		return self
+	end
+
+	clone.start = function( callback )
+		if callback then
+			parallel.waitForAll( callback, this.startEventLoop )
+		else
+			this.startEventLoop()
+		end
 	end
 
 	clone.startEventLoop = function( callback )
@@ -904,7 +1012,8 @@ function clone( ID, callback, options )
 			end
 			for i = #order, 1, -1 do
 				for k,v in pairs( order[i] ) do
-					order[i][k]:draw()
+					element = this.group.fetchObject( order[i][k] )
+					element:draw()
 				end
 			end
 		end,
@@ -915,7 +1024,7 @@ function clone( ID, callback, options )
 				-- Create a new table to store the elements inside of.
 				this.bufferList[ content.zindex ] = {}
 			end
-			table.insert(this.bufferList[content.zindex], content)
+			table.insert(this.bufferList[content.zindex], content.name)
 			--error( this.bufferList[content.zindex][1].zindex )
 		end,
 		removeFromBuffer = function( name )
