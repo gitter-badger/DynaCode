@@ -1,0 +1,376 @@
+--[[
+	DynaCode.2
+	A complete rebuild of the old framework, which was never actually released. I got bored and a little annoyed at the old
+	version, the idea was to make GUIs simple, I felt that they were still too complex, even with DynaCode.
+	This is why I created... DynaCode.2
+	
+	DynaCode is a graphical framework for ComputerCraft, using Views, Controllers and main programs
+	Inspired by Javas JavaFX graphical framework.
+
+	DynaCode is used by all HexCode[Harry Felton] programs.
+
+	Copyright Harry Felton (c) HexCode 2015
+
+	To use:
+	- Create a stage (window)
+	- Set its scene (view/template/layout)
+	- Draw
+
+	To make a scene:
+	There are two ways of creating a scene, procedurally, or in a CXML (FXML/XML) file.
+
+
+
+]]
+
+-- Window objects
+
+
+-- View utils
+
+-- View template (FXML Style)
+--[[
+
+<?DynaCode version="2"?>
+<Window name="somewindow">
+	<SomeItem x="60%"> [60% of somewindow width (parent)] </SomeItem>
+</Window>
+
+Views need to be examined and the information needs to be removed and stored. A class will be used for EACH node in the CXML document.
+
+]]
+
+-- CXML preferences take preference (if set they will simply overwrite procedural settings)
+
+local function checkRequirements( given, required )
+	return false
+end
+
+local function copy( tbl )
+	if type( tbl ) == "table" then
+		-- loop through table, copying keys
+		local copy = {}
+		for key, value in ipairs(tbl) do
+			copy[key] = value
+		end
+		return copy
+	else
+		return tbl
+	end
+end
+
+local defaultSettings = {
+	hide = function( self )
+
+	end,
+	show = function( self )
+
+	end,
+	toggleShow = function( self )
+
+	end,
+	enable = function( self )
+
+	end,
+	disable = function( self )
+
+	end,
+	toggleEnable = function( self )
+
+	end
+}
+local nodeMethods = {
+	remove = function( self )
+
+	end
+}
+local sceneMethods = {
+	addNode = function( self, node )
+
+	end,
+	removeNode = function( self, name )
+
+	end,
+	removeAllNodes = function( self )
+
+	end,
+	addAllNodes = function( self, nodes )
+
+	end,
+	loopNodes = function( self, callback )
+
+	end,
+	getNode = function( name )
+
+	end
+}
+
+stage = {
+	-- window
+	new = function( name, options )
+		local defaults = {
+
+		}
+		-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
+		--[[
+			@return table
+		]]
+		local new = {}
+		new.name = options.name
+		new.nodes = {}
+		setmetatable( new, {__index=options})
+		setmetatable( options, {__index=defaults})
+		setmetatable( defaults, {__index=defaultSettings})
+		new.setScene = function( self, scene )
+			if type(scene) == "table" and scene.type == "scene" then
+				self.scene = scene
+			else
+				error("Expected type scene and got "..type(scene))
+			end
+		end
+		new.getScene = function( self )
+			return self.scene
+		end
+		new.draw = function( self )
+			if self.scene then
+				-- draw window boundary
+				-- loop through scene Nodes and display them
+			end
+		end
+	end
+}
+
+-- 
+function parseargs(s)
+	local arg = {}
+	string.gsub(s, "([%-%w]+)=([\"'])(.-)%2", function (w, _, a)
+		arg[w] = a
+	end)
+	return arg
+end
+
+function collect(s)
+	local stack = {}
+	local top = {}
+	table.insert(stack, top)
+	local ni,c,label,xarg, empty
+	local i, j, str = 1, 1, false
+	while true do
+		ni,j,c,label,xarg, empty = string.find(s, "<(%/?)([%w:]+)(.-)(%/?)>", i)
+		if not ni then break end
+		local text = string.sub(s, i, ni-1)
+		if not string.find(text, "^%s*$") then
+			str = text
+			--table.insert(top, { content = text })
+		end
+		if empty == "/" then  -- empty element tag
+			local tbl = {
+				label=label, 
+				xarg=parseargs(xarg), 
+				empty=1
+			}
+			if str then
+				tbl["content"] = str
+			end
+			table.insert(top, tbl)
+			str = false
+		elseif c == "" then   -- start tag
+			top = {label=label, xarg=parseargs(xarg)}
+			if str then
+				top["content"] = str
+			end
+			table.insert(stack, top)   -- new level
+			str = false
+		else  -- end tag
+			local toclose = table.remove(stack)  -- remove top
+			top = stack[#stack]
+			if #stack < 1 then
+				return false, ("No opening tag for: "..label)
+			end
+			if toclose.label ~= label then
+				return false, ("Cannot close "..toclose.label.." with "..label)
+			end
+			if str then
+				toclose["content"] = str
+			end
+			table.insert(top, toclose)
+			str = false
+		end
+		i = j+1
+	end
+	local text = string.sub(s, i)
+	if not string.find(text, "^%s*$") then
+		table.insert(stack[#stack], text)
+	end
+	if #stack > 1 then
+		return false, ("No closing tag for: "..stack[#stack].label)
+	end
+	return stack[1]
+end
+
+scene = {
+	-- view. Store nodes in [structure] field of scene object
+	load = function( path )
+		--[[
+			- Open path
+			- Load file
+			- Read File
+			- Find Node tags (<nodeName> </nodeName>)
+			- Store these Node tags in a table
+			- Loop each node tag, create the node and apply its settings.
+			- Return the new scene (including methods).
+		]]
+		local newScene = {}
+		setmetatable( newScene, {__index=sceneMethods})
+		local fileContent = file.getAll( path )
+		if not fileContent then error("Cannot find CCML file "..tostring( path )) end
+		local CCML, err = collect( fileContent )
+		local structure = {}
+		if CCML then
+			-- Loop each node, then loop within it and so on. Compile a list of all nodes.
+		else
+			error( err or "Could not parse CCML file" )
+		end
+		-- CCML contains each XML tag and its content. We need to assign a "parent" to each one
+	end,
+	create = function()
+		-- returns blank scene for build using procedural code.
+		new = {}
+		setmetatable( new, {__index=sceneMethods})
+		return new
+	end
+}
+
+file = {
+	getHandle = function( path, mode )
+		if fs.exists( path ) then
+			return fs.open( path, mode or "r" )
+		else
+			return false
+		end
+	end,
+	write = function( path, content )
+		local h = getHandle( path, "w" )
+		if h then
+			h.write( content )
+			h.close()
+			return true
+		else
+			return false
+		end
+	end,
+	append = function( path, content )
+		local h = getHandle( path, "a" )
+		if h then
+			h.write( content )
+			h.close()
+			return true
+		else
+			return false
+		end
+	end,
+	writeLine = function( path, content )
+		local h = getHandle( path, "r" )
+		if h then
+			h.writeLine( content )
+			h.close()
+			return true
+		else
+			return false
+		end
+	end,
+	getLine = function( path )
+		local h = getHandle( path, "r" )
+		if h then
+			local cnt = h.readLine()
+			h.close()
+			return cnt
+		else
+			return false
+		end
+	end,
+	getAll = function( path )
+		local h = getHandle( path, "r" )
+		if h then
+			local cnt = h.readAll()
+			h.close()
+			return cnt
+		else
+			return false
+		end
+	end
+}
+
+wireless = {
+	-- RedNet
+}
+
+remote = {
+	-- HTTP
+}
+
+redstone = {
+	
+}
+
+monitor = {
+	
+}
+
+peripheral = {
+	
+}
+
+--[[
+
+NODE - Object definitions
+
+]]
+
+button = function()
+	local new = {}
+	new.draw = function()
+
+	end
+end
+
+textInput = {
+	
+}
+
+scrollList = {
+	
+}
+
+list = {
+	
+}
+
+--[[
+
+System handlers
+
+]]
+
+
+--[[
+
+System utilities
+
+]]
+
+timer = {
+	
+}
+
+group = {
+	
+}
+
+event = {
+	
+}
+
+buffer = {
+	
+}
