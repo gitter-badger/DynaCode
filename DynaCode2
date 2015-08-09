@@ -1,4 +1,5 @@
 --[[
+
 	DynaCode.2
 	A complete rebuild of the old framework, which was never actually released. I got bored and a little annoyed at the old
 	version, the idea was to make GUIs simple, I felt that they were still too complex, even with DynaCode.
@@ -18,9 +19,6 @@
 
 	To make a scene:
 	There are two ways of creating a scene, procedurally, or in a CXML (FXML/XML) file.
-
-
-
 ]]
 
 -- Window objects
@@ -41,23 +39,57 @@ Views need to be examined and the information needs to be removed and stored. A 
 ]]
 
 -- CXML preferences take preference (if set they will simply overwrite procedural settings)
+--[[
+	--==========--
+   Private Defaults
+	--==========--
+]]
 
-local function checkRequirements( given, required )
-	return false
-end
+local CCMLCFG = {
+	"backgroundColor",
+	"textColor",
+	"disabledBackgroundColor",
+	"disabledTextColor",
+	"unfocusedBackgroundColor",
+	"unfocusedTextColor"
+}
 
-local function copy( tbl )
-	if type( tbl ) == "table" then
-		-- loop through table, copying keys
-		local copy = {}
-		for key, value in ipairs(tbl) do
-			copy[key] = value
-		end
-		return copy
-	else
-		return tbl
-	end
-end
+local CCMLObjects = {
+	["Window"] = {},
+	["Button"] = {
+		["x"] = { format = "Number", default=1 },
+		["y"] = { format = "Number", default=1},
+		["width"] = { format = "Number", default=10},
+		["height"] = { format = "Number", default=2},
+		["text"] = { format = "String", default="undefined"},
+		["toggle"] = { format = "Boolean", default=false},
+		["toggleText"] = { format = "String", default="undefined"},
+		["toggleTextColor"] = { format = "Color", default=colors.white},
+		["toggleBackgroundColor"] = { format = "Color", default=colors.black},
+		["toggleState"] = { format = "Boolean", default=false}
+	},
+	["Text"] = {
+		["x"] = { default=1, format = "Number"},
+		["y"] = { default=1, format = "Number"},
+		["text"] = { default="undefined", format = "String"},
+		["width"] = { default=10, format = "Number"},
+		["cutoff"] = { default="...", format = "String"}
+	},
+	["Paragraph"] = {
+		["x"] = { default=1, format="Number"},
+		["y"] = { default=1, format="Number"},
+		["text"] = { default="undefined", format="String"},
+		["width"] = { default=10, format="Number"},
+		["height"] = { default=2, format="Number"},
+		["cutoff"] = { default="...", format="String"}
+	},
+	["Image"] = {},
+	["TextField"] = {},
+	["PasswordField"] = {},
+	["ReplaceField"] = {},
+	["ScrollList"] = {},
+	["List"] = {}
+}
 
 local defaultSettings = {
 	hide = function( self )
@@ -105,43 +137,13 @@ local sceneMethods = {
 	end
 }
 
-stage = {
-	-- window
-	new = function( name, options )
-		local defaults = {
+--[[
+	--==========--
+    Private Methods
+	--==========--
+]]
 
-		}
-		-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
-		--[[
-			@return table
-		]]
-		local new = {}
-		new.name = options.name
-		new.nodes = {}
-		setmetatable( new, {__index=options})
-		setmetatable( options, {__index=defaults})
-		setmetatable( defaults, {__index=defaultSettings})
-		new.setScene = function( self, scene )
-			if type(scene) == "table" and scene.type == "scene" then
-				self.scene = scene
-			else
-				error("Expected type scene and got "..type(scene))
-			end
-		end
-		new.getScene = function( self )
-			return self.scene
-		end
-		new.draw = function( self )
-			if self.scene then
-				-- draw window boundary
-				-- loop through scene Nodes and display them
-			end
-		end
-	end
-}
-
--- 
-function parseargs(s)
+local function parseargs(s)
 	local arg = {}
 	string.gsub(s, "([%-%w]+)=([\"'])(.-)%2", function (w, _, a)
 		arg[w] = a
@@ -149,7 +151,7 @@ function parseargs(s)
 	return arg
 end
 
-function collect(s)
+local function collect(s)
 	local stack = {}
 	local top = {}
 	table.insert(stack, top)
@@ -208,169 +210,342 @@ function collect(s)
 	return stack[1]
 end
 
-scene = {
-	-- view. Store nodes in [structure] field of scene object
-	load = function( path )
-		--[[
-			- Open path
-			- Load file
-			- Read File
-			- Find Node tags (<nodeName> </nodeName>)
-			- Store these Node tags in a table
-			- Loop each node tag, create the node and apply its settings.
-			- Return the new scene (including methods).
-		]]
-		local newScene = {}
-		setmetatable( newScene, {__index=sceneMethods})
-		local fileContent = file.getAll( path )
-		if not fileContent then error("Cannot find CCML file "..tostring( path )) end
-		local CCML, err = collect( fileContent )
-		local structure = {}
-		if CCML then
-			-- Loop each node, then loop within it and so on. Compile a list of all nodes.
-		else
-			error( err or "Could not parse CCML file" )
-		end
-		-- CCML contains each XML tag and its content. We need to assign a "parent" to each one
-	end,
-	create = function()
-		-- returns blank scene for build using procedural code.
-		new = {}
-		setmetatable( new, {__index=sceneMethods})
-		return new
+local function checkRequirements( given, required, silent )
+	if not given or type(given) ~= "table" then
+		error("Options of type table expected to create node, got "..type(given).." instead. Cannot pass node.")
 	end
-}
-
-file = {
-	getHandle = function( path, mode )
-		if fs.exists( path ) then
-			return fs.open( path, mode or "r" )
-		else
-			return false
+	local r = required
+	local function compile( prefix )
+		local msg = prefix or ""
+		for k, v in ipairs(r) do
+			msg = msg..tostring(v)
+			if k < #r then msg = msg .. "," end
 		end
-	end,
-	write = function( path, content )
-		local h = getHandle( path, "w" )
-		if h then
-			h.write( content )
-			h.close()
-			return true
-		else
-			return false
-		end
-	end,
-	append = function( path, content )
-		local h = getHandle( path, "a" )
-		if h then
-			h.write( content )
-			h.close()
-			return true
-		else
-			return false
-		end
-	end,
-	writeLine = function( path, content )
-		local h = getHandle( path, "r" )
-		if h then
-			h.writeLine( content )
-			h.close()
-			return true
-		else
-			return false
-		end
-	end,
-	getLine = function( path )
-		local h = getHandle( path, "r" )
-		if h then
-			local cnt = h.readLine()
-			h.close()
-			return cnt
-		else
-			return false
-		end
-	end,
-	getAll = function( path )
-		local h = getHandle( path, "r" )
-		if h then
-			local cnt = h.readAll()
-			h.close()
-			return cnt
-		else
-			return false
+		return msg
+	end
+	for opt in pairs( given ) do
+		for key, value in ipairs( r ) do
+			if value == opt then
+				table.remove( r, key )
+			end
 		end
 	end
-}
-
-wireless = {
-	-- RedNet
-}
-
-remote = {
-	-- HTTP
-}
-
-redstone = {
-	
-}
-
-monitor = {
-	
-}
-
-peripheral = {
-	
-}
-
---[[
-
-NODE - Object definitions
-
-]]
-
-button = function()
-	local new = {}
-	new.draw = function()
-
+	if #r <= 0 then return true 
+	elseif not silent then
+		error( compile("Missing requirements to create node: \n") )
+	else
+		return false, compile("")
 	end
 end
 
-textInput = {
-	
-}
-
-scrollList = {
-	
-}
-
-list = {
-	
-}
-
---[[
-
-System handlers
-
-]]
+local function copy( tbl )
+	if type( tbl ) == "table" then
+		-- loop through table, copying keys
+		local copy = {}
+		for key, value in ipairs(tbl) do
+			copy[key] = value
+		end
+		return copy
+	else
+		return tbl
+	end
+end
 
 
---[[
+function clone( options )
+	-- Create a new copy of DynaCode, this is to be used practically
+	local ok, err = checkRequirements( options, {
+		"instanceName"
+	}, true)
+	local defaults = {}
+	if not ok and err then
+		error("Cannot create clone, missing: "..tostring( err ))
+	end
+	local clone = {}
+	local instance = {}
+	instance.loggingReady = false
+	setmetatable( instance, {__index=clone})
+	setmetatable( clone, {__index=options})
+	setmetatable( options, {__index=defaults})
 
-System utilities
 
-]]
+	local function log( mode, msg )
+		if instance.loggingReady then
+			local prefix = "Info"
+			if mode == "w" then prefix = "Warn" elseif mode == "e" then prefix = "ERROR" end
+			clone.file.append( instance.loggingPath, "["..prefix.."] "..msg.."\n")
+		end
+	end
 
-timer = {
-	
-}
 
-group = {
-	
-}
+	--[[
+		--==========--
+	  	Stage & Scenes
+		--==========--
+	]]
 
-event = {
-	
-}
+	clone.stage = {
+		-- Window
+		new = function( options )
+			checkRequirements(options, {"name"})
+			local defaults = {
+				windowed = false,
+			}
 
-buffer = {
-	
-}
+			-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
+			--[[
+				@return table
+			]]
+			local settings = {} --settings are now private and must be accessed via methods.
+			local function draw()
+				-- Clear the area using the backgroundColor. Then loop each node and call its draw function (node.draw)
+			end
+			local function loop()
+				-- Each stage has an event loop. Any events fired will only affect the current stage (last clicked)
+				-- this loop must ONLY be running if the stage is ACTIVE. When unfocused this loop must be interrupted using event "break_stage_inactive"
+				-- To break one loop use "break_stage_<STAGE.NAME>"
+				while true do
+					local e, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
+					if e == "break_stage_"..settings.name then
+						print("Broken "..settings.name)
+						break
+					elseif e == "break_stage_inactive" then
+						-- is this stage inactive? if so, break the loop
+						if not settings.active then break end
+					end
+				end
+			end
+			setmetatable( settings, {__index=options} )
+			setmetatable( options, {__index=defaults} )
+			new = {}
+			new.setBackgroundColor = function( bg, r ) settings.backgroundColor = bg if not r then draw() end end
+			new.getBackgroundColor = function() return settings.backgroundColor end
+			new.setTextColor = function( tc, r ) settings.textColor = tc if not r then draw() end end
+			new.getTextColor = function() return settings.textColor end
+			new.setScene = function( scene ) settings.scene = scene draw() end
+			new.getScene = function() return settings.scene end
+			new.getEnable = function() return settings.enabled end
+			new.setEnable = function( e, r ) settings.enabled = e if not r then draw() end end
+			new.setVisible = function() end
+			new.getVisible = function() end
+			new.draw = function() draw() end
+			new.createTimer = function( name, duration, method, rep )
+				settings.timers = settings.timers or {}
+
+				settings.timers[ os.startTimer( duration ) ] = {
+					duration = duration,
+					oncomplete = method,
+					rp = rep,
+					name = name,
+					status = {
+						running = false,
+						startedWhen = false
+					},
+					parent = settings.name -- Only the caller stage responds. If the stage is removed the timer won't be resolved, therefore stage.removeAllTimers() should be called before removing the stage.
+				}
+			end
+			new.stopTimer = function( name )
+
+			end
+			new.getName = function() return settings.name end
+			new.start = function() print("started "..settings.name) loop() end
+			new.stop = function() os.queueEvent("break_stage_"..tostring(settings.name)) end
+			return new
+		end
+	}
+
+	clone.scene = {
+		-- view. Store nodes in [structure] field of scene object
+		load = function( path )
+			--[[
+				- Open path
+				- Load file
+				- Read File
+				- Find Node tags (<nodeName> </nodeName>)
+				- Store these Node tags in a table
+				- Loop each node tag, create the node and apply its settings.
+				- Return the new scene (including methods).
+			]]
+			local newScene = {}
+			setmetatable( newScene, {__index=sceneMethods})
+			local fileContent = file.getAll( path )
+			if not fileContent then error("Cannot find CCML file "..tostring( path )) end
+			local CCML, err = collect( fileContent )
+			local structure = {}
+			if CCML then
+				-- Loop each node, then loop within it and so on. Compile a list of all nodes.
+			else
+				error( err or "Could not parse CCML file" )
+			end
+			-- CCML contains each XML tag and its content. We need to assign a "parent" to each one
+		end,
+		create = function()
+			-- returns blank scene for build using procedural code.
+			new = {}
+			setmetatable( new, {__index=sceneMethods})
+			return new
+		end
+	}
+
+	--[[
+		--==========--
+    Miscellaneous Utilities
+		--==========--
+	]]
+
+	clone.file = {
+		getHandle = function( path, mode )
+			if fs.exists( path ) then
+				return fs.open( path, mode or "r" )
+			else
+				return false
+			end
+		end,
+		write = function( path, content )
+			local h = clone.file.getHandle( path, "w" )
+			if h then
+				h.write( content )
+				h.close()
+				return true
+			else
+				return false
+			end
+		end,
+		append = function( path, content )
+			local h = clone.file.getHandle( path, "a" )
+			if h then
+				h.write( content )
+				h.close()
+				return true
+			else
+				return false
+			end
+		end,
+		writeLine = function( path, content )
+			local h = clone.file.getHandle( path, "r" )
+			if h then
+				h.writeLine( content )
+				h.close()
+				return true
+			else
+				return false
+			end
+		end,
+		getLine = function( path )
+			local h = clone.file.getHandle( path, "r" )
+			if h then
+				local cnt = h.readLine()
+				h.close()
+				return cnt
+			else
+				return false
+			end
+		end,
+		getAll = function( path )
+			local h = clone.file.getHandle( path, "r" )
+			if h then
+				local cnt = h.readAll()
+				h.close()
+				return cnt
+			else
+				return false
+			end
+		end
+	}
+	wireless = {
+		-- RedNet
+	}
+
+	remote = {
+		-- HTTP
+	}
+
+	redstone = {
+		
+	}
+
+	monitor = {
+		
+	}
+
+	peripheral = {
+		
+	}
+
+	clone.group = {
+		
+	}
+
+
+	--[[
+		--==========--
+	  Node Declarations
+		--==========--
+	]]
+
+	clone.button = function()
+		local new = {}
+		new.draw = function()
+
+		end
+	end
+
+	clone.textInput = function()
+		
+	end
+
+	clone.scrollList = function()
+		
+	end
+
+	clone.list = function()
+		
+	end
+
+	--[[
+		--==========--
+	   Logging Methods
+		--==========--
+	]]
+
+	clone.setLogging = function( v )
+		instance.logging = v
+	end
+
+	clone.getLogging = function( v )
+		return instance.logging
+	end
+
+	clone.getLog = function( v )
+		-- Open the log file and return its contents.
+		return clone.file.getAll( instance.loggingPath )
+	end
+
+	clone.setLoggingPath = function( v )
+		instance.loggingPath = v
+	end
+
+	clone.getLoggingPath = function()
+		return instance.loggingPath
+	end
+
+	clone.logToFile = function( mode, message )
+		log( mode, message )
+	end
+
+	clone.initializeLogging = function()
+		if not instance.logging or not instance.loggingPath then
+			error("Set logging and logging path before initializing")
+		end
+		local h = fs.open( instance.loggingPath, "w" )
+		if h then
+			h.write("--@@==== DynaCode Logging - Instance: "..instance.instanceName.." ====@@--\n")
+			h.close()
+			instance.loggingReady = true
+		else
+			error("Failed to create file handle for path: "..tostring( instance.loggingPath ))
+		end
+	end
+
+	return clone
+end
