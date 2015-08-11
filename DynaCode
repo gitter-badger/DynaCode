@@ -1,5 +1,5 @@
 --[[
-	DynaCode Framework
+	DynaCode Framework [DEPRECATED]
 
 	Copyright Harry Felton (c) 2015
 
@@ -13,10 +13,12 @@
 ]]
 
 function clone( ID, callback, options )
+	error("DYNACODE Is officially deprecated. Try version 2 here: https://github.com/hbomb79/DynaCode/blob/master/DynaCode2 ")
 	local defaults = { --If an element cannot find a variable in itself(self), the passed settings(self.options) or the instance settings(options) then it will fallback to these (defaults)
 		allowTerminate = false,
 		addToBufferOnCreation = false,
 		protected = true, -- Prevents laggy operations
+		redraw = true,
 		toggle = function( self )
 			-- Toggle click state of element
 			if self.toggled then self.toggled = false else self.toggled = true end
@@ -52,6 +54,10 @@ function clone( ID, callback, options )
 		end,
 		beforeRedraw = function( self )
 
+		end,
+		remove = function( self )
+			self:bufferRemove()
+			self:removeFromDict()
 		end,
 		scrollBackground = colors.lightGray,
 		scrollColor = colors.gray,
@@ -92,9 +98,8 @@ function clone( ID, callback, options )
 	if not ID then error"Needs ID to init" end
 	-- Create a new table for elements to be stored.
 	local clone = {}
-	clone.alias={
-	}
-	setmetatable( defaults, {__index=clone.alias})
+	clone.alias={}
+	setmetatable( clone.alias, {__index=defaults})
 	if options then setmetatable( clone, {__index = options} ) else
 		setmetatable( clone, {__index=defaults})
 	end
@@ -104,6 +109,7 @@ function clone( ID, callback, options )
 	clone.bufferList = {}
 	clone.customEvents = {}
 	clone.elementGroups = {}
+	clone.ID = ID
 	clone.termX, clone.termY = term.getSize()
 	local this = clone
 
@@ -162,6 +168,7 @@ function clone( ID, callback, options )
 		setmetatable( new, {__index = options} )
 		new.type = "button"
 		new.getLongest = function( self )
+			if not self.canBeToggled then return #self.text end
 			if #self.text >= #self.toggleText then 
 				return self.text 
 			else 
@@ -181,8 +188,8 @@ function clone( ID, callback, options )
 			end
 			if self.beforeRedraw then self:beforeRedraw() end
 			term.setCursorPos( self.x, self.y )
-			this.drawing.drawStraight(self.x, self.y, self.x + #self.getLongest( self ) + self.padding, self.defaultBackground)
 			if self.visible then
+				this.drawing.drawStraight(self.x, self.y, self.x + self.getLongest( self ) + self.padding - 1, self.defaultBackground)
 				--error( self.enabled )
 				if self.enabled then
 					if self.toggled then
@@ -206,8 +213,8 @@ function clone( ID, callback, options )
 					self:drawPadding()
 					term.write( text )
 				end
+				self:drawPadding() 
 			end
-			self:drawPadding() 
 			term.setTextColor( self.defaultTextColor )
 			term.setBackgroundColor(self.defaultBackground)
 			term.setCursorPos( oldX, oldY )
@@ -505,7 +512,58 @@ function clone( ID, callback, options )
 			end
 		end
 		return false
+	end
 
+	clone.keyMenu = function( options )
+		req, missing = this.checkRequirements( options, {
+			"name",
+			"content"
+		})
+		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
+		setmetatable( options, {__index=this})
+		local new = {}
+		new.type = "keymenu"
+		new.selected = 1
+		setmetatable( new, {__index=options})
+
+		new.draw = function( self )
+			if not self.visible or not self.enabled then return self end
+			for k, option in ipairs( self.content ) do
+				-- Loop each option, if selected, set color to @self.toggleTextColor else set to @self.textColor.
+				local bg, tc = self.backgroundColor, self.textColor
+				if k  == self.selected then
+					bg, tc = self.toggleBackgroundColor, self.toggleTextColor
+				end
+				term.setBackgroundColor( bg )
+				term.setTextColor( tc )
+				local x, y = self.x, self.y + k - 1
+				if self.center then
+					x = this.termX/2 - ( #option.label / 2 )
+				end
+				term.setCursorPos( x, y )
+				write( option.label )
+			end
+		end
+
+		new.keyup = function( self, event, key )
+			-- Check key
+			if key == keys.down or key == keys.s then
+				-- If selected is at boundary, set to 1
+				self.selected = self.selected + 1
+				if self.selected > #self.content then self.selected = 1 end
+			elseif key == keys.up or key == keys.w then
+				self.selected = self.selected - 1
+				if self.selected < 1 then self.selected = #self.content end
+			elseif key == keys.enter then
+				if self.content[ self.selected ] and type( self.content[ self.selected ].onselect ) == "function" then
+					self.content[ self.selected ].onselect( self )
+				end
+			end
+			self:draw()
+		end
+
+		new:addToDict()
+		return new
 	end
 
 	clone.scroll = function( options )
@@ -544,7 +602,7 @@ function clone( ID, callback, options )
 								end
 								local cx = self.x
 								if self.center then
-									cx = math.ceil( self.x - 1 + self.width/2-( #v/2 ) ) - 1
+									cx = math.ceil( self.x - 1 + self.width/2-( #v/2 ) )
 								end
 								term.setCursorPos( cx, self.y+ln)
 								write( v )
@@ -553,25 +611,12 @@ function clone( ID, callback, options )
 								-- The element is a button, its Y axis needs to be manipulated for it to scroll correctly
 								v.y = self.y+ln
 								if self.center then
-									v.x = math.ceil( self.x - self.padding*2 + self.width / 2 - ( ( #v.text+v.padding ) / 2 ) )-1
+									v.x = math.ceil( self.x - self.padding*2 + self.width / 2 - ( ( #v.text+v.padding ) / 2 ) )
 								else
 									v.x = self.x
 								end
 								v:draw()
 								ln = ln + 1
-							end
-						end
-					elseif v.type == "align" then
-						error"Align objects not supported"
-						-- @k is the index of the align start
-						-- Loop through the align correctly. Do not hide the whole thing if it is out of index.
-						local inc = false
-						for key, value in ipairs( v.content ) do
-							if k + key >= self.offset and ln <= self.height-1 then
-								term.setCursorPos( self.x, self.y+ln )
-								write( value )
-								ln = ln + 1
-								inc = true
 							end
 						end
 					end
@@ -587,11 +632,11 @@ function clone( ID, callback, options )
 				-- Calculate new scroll bar position
 				maxoffset = #self.content - self.height + 1
 				if self.offset > maxoffset then self.offset = maxoffset self:draw() return self end
-				height =  math.floor( ( self.height / 100 ) * ( ( self.height / #self.content ) * 100 ) ) -- Get height as result of percentage
+				height =  math.ceil( ( self.height / 100 ) * ( ( self.height / #self.content ) * 100 ) ) -- Get height as result of percentage
 				pos = math.floor( self.offset * ( self.height / #self.content ) )
 				if pos < 1 then pos = 1
 				elseif pos > self.height - height then pos = self.height - height end
-				if height > 0 and maxoffset > 0 then
+				if height > 0 and maxoffset > 0 and height ~= self.height then
 					if self.offset >= maxoffset then
 						pos = self.height - height
 					elseif self.offset == 1 then
@@ -673,21 +718,6 @@ function clone( ID, callback, options )
 		return new
 	end
 
-
-	clone.scrollAlign = function( options )
-		req, missing = this.checkRequirements( options, {
-			"align",
-			"content"
-		})
-		--error( textutils.serialize( missing ) )
-		if not req then error("Missing requirements: "..textutils.serialize( missing )) end
-		new = {}
-		new.type = "align"
-		setmetatable( new, {__index = options})
-		setmetatable( options, { __index = this } )
-		return new
-	end
-
 	clone.checkRequirements = function( given, req )
 		if not given then error"No options given for object" end
 		set = {}
@@ -745,7 +775,7 @@ function clone( ID, callback, options )
 
 
 
-	clone.eventRegister = function( event, func )
+	clone.eventBind = function( event, func )
 		-- Create custom event handler
 		if not this.customEvents[event] then
 			this.customEvents[event] = {} --Create a new table space for this event
@@ -753,7 +783,7 @@ function clone( ID, callback, options )
 		table.insert(this.customEvents[event], func)
 	end
 
-	clone.eventRemove = function( event )
+	clone.eventUnbind = function( event )
 		-- remove custom set event handler
 		if this.customEvents[event] then
 			for i, v in ipairs( this.customEvents[event] ) do
@@ -764,7 +794,9 @@ function clone( ID, callback, options )
 
 	clone.hideAll = function()
 		for k, v in pairs( this.bufferList ) do
-			for i, obj in pairs( this.bufferList[k] ) do
+			for i, v in pairs( this.bufferList[k] ) do
+				obj = this.group.fetchObject( v )
+				if not obj.hide then error("unknown object: "..tostring( obj ) ) end
 				obj:hide()
 			end
 		end
@@ -841,7 +873,7 @@ function clone( ID, callback, options )
 					end
 				end
 				if redraw then
-					this.buffer.drawBuffer()
+					--this.buffer.drawBuffer()
 				end
 			end
 		end
@@ -880,6 +912,22 @@ function clone( ID, callback, options )
 				if v.name and v.name == name then
 					return this.name[k]
 				end
+			end
+		end,
+		removeAll = function( group )
+			if type( group ) == "string" then
+				group = this.group.fetch( group )
+			end
+			for k, v in pairs( group ) do
+				el = this.group.fetchObject( v )
+				if el and el.remove then
+					el:remove()
+				end
+			end
+		end,
+		loop = function( group, callback ) 
+			for k, item in ipairs( group ) do
+				item:callback()
 			end
 		end,
 		changeSetting = function( group, setting, newValue )
@@ -921,7 +969,7 @@ function clone( ID, callback, options )
 		return self
 	end
 	clone.bufferRemove = function( self )
-		this.buffer.removeFromBuffer( self )
+		this.buffer.removeFromBuffer( self.name )
 		return self
 	end
 
@@ -936,7 +984,7 @@ function clone( ID, callback, options )
 	clone.startEventLoop = function( callback )
 		-- Start loop, run callback
 		if this.allowTerminate then
-			this.eventRegister("terminate", function(event)
+			this.eventBind("terminate", function(event)
 				this.stopEventLoop()
 				error("Terminated Program")
 			end)
@@ -944,8 +992,10 @@ function clone( ID, callback, options )
 		if callback then callback() end
 		while true do
 			local event, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
-			if event == "cancel_loop" then
+			if event == "cancel_loop_"..tostring(this.ID) then
 				break
+				-- Calling an os event [cancel_loop_<targetID>]. @targetID = ID at time of clone.
+				-- This is ID specific else it cancels all clone loops, not just the one you called from.
 			elseif event == "mouse_click" then
 				this.click( event, p1, p2, p3 )
 			elseif event == "mouse_scroll" then
@@ -962,7 +1012,7 @@ function clone( ID, callback, options )
 				end
 			elseif event == "key" then
 				for i, v in ipairs( this.name ) do
-					if v.enabled and v.focused and v.type == "input" then v:keyup( event, p1 ) end
+					if v.enabled and v.focused and v.type == "input" or v.enabled and v.visible and v.type == "keymenu" then v:keyup( event, p1 ) end
 				end
 			elseif event == "timer" then
 				-- Check if timer is in timer table
@@ -984,9 +1034,10 @@ function clone( ID, callback, options )
 			end
 		end
 	end
+
 	clone.stopEventLoop = function( callback )
 		-- Stop event loop, code after this is run in the program will execute.
-		os.queueEvent("cancel_loop")
+		os.queueEvent("cancel_loop_"..tostring( this.ID ))
 		if callback then callback() end
 	end
 
@@ -994,12 +1045,13 @@ function clone( ID, callback, options )
 
 	clone.buffer = {
 		--[[
+		
 			Add elements to a draw buffer.
 			Every time a change happens to the buffer, it will be resorted and drawn.
 	
 			Each element must contain a zindex property, or else the buffer will default to 1.
 
-			If text is wanted in the buffer, the this.text object must be used instead
+			If text is wanted in the buffer, the this.textLine or this.textBlock object must be used instead
 
 		]]
 		drawBuffer = function()
@@ -1013,7 +1065,10 @@ function clone( ID, callback, options )
 			for i = #order, 1, -1 do
 				for k,v in pairs( order[i] ) do
 					element = this.group.fetchObject( order[i][k] )
-					element:draw()
+					if not element then error("Missing element: "..tostring( order[i][k] ) ) end
+					if element.redraw then
+						element:draw()
+					end
 				end
 			end
 		end,
@@ -1028,13 +1083,25 @@ function clone( ID, callback, options )
 			--error( this.bufferList[content.zindex][1].zindex )
 		end,
 		removeFromBuffer = function( name )
+
+			for k, z in pairs( this.bufferList ) do
+				--error( textutils.serialize( z ) )
+				--for _, v in pairs( z ) do
+				for i, v in ipairs( z ) do
+					if this.group.fetchObject( v ).name == name then
+						--print( textutils.serialize( v ))
+						table.remove( z, i )
+					end
+				end
+			end
+			--[[
 			for i = 0, #this.bufferList do
 				for i, v in ipairs( this.bufferList[i] ) do
 					if v.name == name then
 						table.remove( this.bufferList[i], i )
 					end
 				end
-			end
+			end]]
 		end
 	}
 

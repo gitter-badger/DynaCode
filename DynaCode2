@@ -1,44 +1,173 @@
 --[[
 
-	DynaCode.2
-	A complete rebuild of the old framework, which was never actually released. I got bored and a little annoyed at the old
+	DynaCode V2
+	A complete rebuild of the old framework, which was never actually released (-_-). I got bored and a little annoyed at the old
 	version, the idea was to make GUIs simple, I felt that they were still too complex, even with DynaCode.
-	This is why I created... DynaCode.2
+	This is why I created... DynaCode V2
 	
-	DynaCode is a graphical framework for ComputerCraft, using Views, Controllers and main programs
-	Inspired by Javas JavaFX graphical framework.
+	DynaCode is a graphical framework for ComputerCraft, using scenes, stages and controller functions. 
+	Inspired by JavaFX.
 
-	DynaCode is used by all HexCode[Harry Felton] programs.
+	DynaCode is used by all HexCode programs.
+	
+	Released under MIT license, see License file here: https://github.com/hbomb79/DynaCode/blob/master/LICENSE
 
-	Copyright Harry Felton (c) HexCode 2015
+	Copyright Harry Felton(HexCode) and all other contributors 2015
 
-	To use:
-	- Create a stage (window)
-	- Set its scene (view/template/layout)
-	- Draw
-
-	To make a scene:
-	There are two ways of creating a scene, procedurally, or in a CXML (FXML/XML) file.
 ]]
 
--- Window objects
+if not term.isColor() or not term.isColor then
+	error("DynaCode V2 Requires advanced (gold) computer running ComputerCraft 1.5+")
+end
 
+local update = {
+	keepUpToDate = true, -- Check for updates when this API is loaded. If update check fails the API will simply continue.
+	updatePath = "DynaCode2", -- Where is the API installed
+	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode2", -- Path to download. This is set to my repository on GitHub.
+	versionUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/version", -- Path to version file. This is set to my repository on GitHub.
+	versionPath = "DynaCodeVersion", -- Leave as is if you like, or change to a file (ideally in the same directory as DynaCode)
+	output = true, -- print information to the screen during update check
+	resetScreenPost = true -- clear the screen after update check (recommended because the text color will be changed)
+}
 
--- View utils
-
--- View template (FXML Style)
 --[[
 
-<?DynaCode version="2"?>
-<Window name="somewindow">
-	<SomeItem x="60%"> [60% of somewindow width (parent)] </SomeItem>
-</Window>
+NOTE: Do not edit past this point **unless** you understand what you are doing.
+If you experience crashes after changing ANY (AT ALL!) code, DO NOT REPORT. Re-download DynaCode or revert
+your changes, then try to reproduce the error WITHOUT editing source code. Then and only then will
+your report be addressed.
 
-Views need to be examined and the information needs to be removed and stored. A class will be used for EACH node in the CXML document.
+If you encounter a crash then follow the steps:
+
+1. Screen shot the error
+2. Enable logging in DynaCode IMMEDIATELLY after cloning ( .clone() ) refer to: https://github.com/hbomb79/DynaCode/wiki/Clone-Methods-&-Objects/ for how to.
+3. Attempt to reproduce the error with logging enabled.
+4. Write down the steps you used to reproduce.
+5. Create a comment in the DynaCode forum page (CC Forums) and include the screen shot, your steps to reproduce, the contents of the log file and your code.
+
+I will get back to you as soon as I can and help you fix the problem.
+
+If we cannot track down the problem, then I will request you send me your DynaCode copy, which will then be hash checked against the online version.
+If your version has any changes (excluding update table, comments or unrelated code) and reverting your changes fixed the problem, then your code will
+be sent back and future reports will not be processed.
+
+If your version has any changes that, once reverted did not change the outcome, then the changes will be omitted and your request will be processed at
+no penalty.
 
 ]]
 
--- CXML preferences take preference (if set they will simply overwrite procedural settings)
+local function uPrint( ... )
+	if update.output then
+		print( ... )
+	end
+end
+
+function setUpdatePath( v )
+	update.updatePath = v
+end
+
+function getUpdatePath()
+	return update.updatePath
+end
+
+function setVersionPath( v )
+	update.versionPath = v
+end
+
+function getVersionPath()
+	return update.versionPath
+end
+
+function setOutput( v )
+	update.output = v
+end
+
+function getOutput()
+	return update.output
+end
+
+function setResetScreen( v )
+	update.resetScreenPost = v
+end
+
+function getResetScreen()
+	return update.resetScreenPost
+end
+
+
+
+local function updateCheck()
+	uPrint("DynaCode V2 - Update Check Begin")
+	for i = 1, 3 do
+		uPrint("Version fetch attempt ", i, " of ", 3)
+		local response = http.get( update.versionUrl )
+		if response then
+			uPrint("Version information fetch complete")
+			local version, sVersion = response.readLine(), false
+			local h = fs.open( update.versionPath, "r" )
+			if h then
+				sVersion = h.readLine()
+				uPrint("Local version file read complete")
+				h.close()
+			else
+				term.setTextColor( colors.orange )
+				uPrint("No local version file found. Forcing update")
+				term.setTextColor( colors.white )
+			end
+			if not sVersion or not h or sVersion ~= version or not fs.exists( update.updatePath ) then
+				term.setTextColor( colors.orange )
+				uPrint("New update available, fetching")
+				term.setTextColor( colors.white )
+				-- perform update
+				for nI = 1, 3 do
+					uPrint("Fetching update. Attempt ", nI, " of ", 3)
+					local updateResponse = http.get( update.updateUrl )
+					if updateResponse then
+						uPrint("Update downloaded, installing")
+						local content = updateResponse.readAll()
+						local h = fs.open( update.updatePath, "w" )
+						h.write( content )
+						h.close()
+						local h = fs.open( update.versionPath, "w" )
+						h.write( version )
+						h.close()
+						term.setTextColor( colors.lime )
+						uPrint("Installed. Rebooting in 1 second")
+						sleep(1) 
+						os.reboot()
+					end
+				end
+				term.setTextColor( colors.red )
+				uPrint("Failed to fetch update!")
+				return false
+			elseif sVersion == version then
+				term.setTextColor( colors.lime )
+				uPrint("Up-To-Date!")
+				return true
+			end
+		end
+	end
+	term.setTextColor( colors.red )
+	uPrint("Failed to download version data!")
+	return false
+end
+
+function checkForUpdates()
+	return updateCheck()
+end
+
+if update.keepUpToDate then
+	updateCheck()
+	sleep(0.5)
+	if update.resetScreenPost then
+		term.clear()
+		term.setCursorPos(1, 1)
+		term.setTextColor( colors.white )
+	end
+end
+
+
+
 --[[
 	--==========--
    Private Defaults
@@ -257,12 +386,10 @@ function clone( options )
 	local ok, err = checkRequirements( options, {
 		"instanceName"
 	}, true)
-	local defaults = {}
 	if not ok and err then
 		error("Cannot create clone, missing: "..tostring( err ))
 	end
-	local clone = {}
-	local instance = {}
+	local stages, scenes, instance, clone, defaults, stageBuffer = {}, {}, {}, {}, {}, {}
 	instance.loggingReady = false
 	setmetatable( instance, {__index=clone})
 	setmetatable( clone, {__index=options})
@@ -278,114 +405,522 @@ function clone( options )
 	end
 
 
+
+	local function getScene( sc )
+
+		--[[
+			Every time a scene is created it will be added to an instance based dictionary.
+
+			If a stage that owns a scene is removed, that scene will be removed as well.
+
+		]]
+
+		local v
+
+		if type( sc ) == "string" then
+			v = {}
+			v.sceneName = sc
+		elseif type( sc ) == "table" then
+			v = sc
+		else
+			error("Argument of String or Table expected, got: "..tostring( type(sc) ) )
+		end
+
+		for key, scene in ipairs( scenes ) do
+			-- check this scene
+			if scene.sceneName == v.sceneName then
+				-- this is the scene.
+				return scene
+			end
+		end
+		return false
+	end
+
+	local function removeScene( v )
+
+		for key, scene in ipairs( scenes ) do
+			if scene.sceneName == v.sceneName then
+				table.remove( scenes, key )
+			end
+		end
+
+	end
+
+	local function addScene( scene )
+
+		removeScene( scene )
+		table.insert( scenes, scene )
+
+	end
+
+	local function getStage( stageName )
+
+		for k, v in ipairs( stages ) do
+			if v.getName() == stageName then
+				return v
+			end
+		end
+		return false
+	end
+
+	local function removeStage( v )
+		for key, stage in ipairs( stages ) do
+			if stage == v or stage.getName() == v.name then
+				table.remove( stages, key )
+			end
+		end
+	end
+
+	local function addStage( stage )
+		removeStage( stage )
+		table.insert( stages, stage )
+	end
+
+	local buffer = {
+
+		reorder = function( toplevel ) 
+			-- The buffer is a table populated by stages. DynaCode works out which window is on top by iterating the table using the value as a base.
+			-- First, loop the buffer, and create a list of levels. We will use this list to loop through the buffer later and preserve the levels of previous stages.
+			local structure = copy( stages )
+
+			-- Set the top level stage to a level of 1
+			local i = 1
+			for key, item in ipairs( structure ) do
+				if item.getName() == toplevel then
+					item.setLevel(1) -- set to locally
+					local tempStage = getStage( toplevel )
+					if not tempStage then error("Stage set in buffer, but not in dictionary") end
+					tempStage.setLevel(1) -- because structure is a copy, we need to save changes we make to the instance stages.
+					i = 2
+				end
+			end
+			table.sort(structure, function( a, b ) return a.getLevel() > b.getLevel() end)
+			for key, item in ipairs( structure ) do
+				if item.getName() ~= toplevel then
+					item.setLevel( i )
+					local tempStage = getStage( item.getName() )
+					if not tempStage then error("Stage set in buffer, but not in dictionary: "..item.getName()) end
+					tempStage.setLevel( i )
+					i = i + 1
+				end
+			end
+			table.sort(structure, function( a, b ) return a.getLevel() > b.getLevel() end)
+
+			stageBuffer = structure
+			for k, v in ipairs( stageBuffer ) do
+				print( v.getLevel() .. ":: " .. v.getName() )
+			end
+
+		end,
+		redrawAll = function( ignoreRules ) end,
+	}
+
+	clone.bufferReorder = function( preference )
+		buffer.reorder( preference )
+	end
+
+
 	--[[
 		--==========--
 	  	Stage & Scenes
 		--==========--
 	]]
 
-	clone.stage = {
+	clone.stage = function( options )
 		-- Window
-		new = function( options )
-			checkRequirements(options, {"name"})
-			local defaults = {
-				windowed = false,
-			}
+		checkRequirements(options, {"stageName"})
+		local defaults = {
+			windowed = false,
+			allowTerminate = false,
+			level = 1
+		}
 
-			-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
-			--[[
-				@return table
-			]]
-			local settings = {} --settings are now private and must be accessed via methods.
-			local function draw()
-				-- Clear the area using the backgroundColor. Then loop each node and call its draw function (node.draw)
-			end
-			local function loop()
-				-- Each stage has an event loop. Any events fired will only affect the current stage (last clicked)
-				-- this loop must ONLY be running if the stage is ACTIVE. When unfocused this loop must be interrupted using event "break_stage_inactive"
-				-- To break one loop use "break_stage_<STAGE.NAME>"
-				while true do
-					local e, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
-					if e == "break_stage_"..settings.name then
-						print("Broken "..settings.name)
+		-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
+		--[[
+			@return table
+		]]
+		local settings = { active = true, timers = {}, co = false } --settings are now private and must be accessed via methods.
+
+		--[[
+			A stages loop is run in a Coroutine, meaning each stage runs independently from each other and shares only events.
+		]]
+
+		local function draw()
+			-- Clear the area using the backgroundColor. Then loop each node and call its draw function (node.draw)
+		end
+		local function executeFunctionFromScene( sName )
+			if not settings.scene then error("No scene set to this stage. Use stage.setScene()") end
+			local sScene = getScene( settings.scene )
+			if not sScene then error("Scene is not active") end
+			if not sScene.executeFunctionFromController( sName ) then error("Could not find function '"..sName.."' in controller") end
+		end
+
+		local function handleClick( event, nButton, nX, nY )
+			print("Event received: "..tostring( event ))
+		end
+
+		local function handleScroll( event, nDirection, nX, nY )
+			print("Event received: "..tostring( event ))
+		end
+
+		local function handleDrag( event, nX, nY )
+			print("Event received: "..tostring( event ))
+		end
+
+		local function handleKey( event, kKey, bHeld )
+			print("Event received: "..tostring( event ))
+		end
+
+		local function handleChar( event, char )
+			print("Event received: "..tostring( event ))
+		end
+
+		local function loop()
+			-- Each stage has an event loop. Any events fired will only affect the current stage (last clicked)
+			-- this loop must ONLY be running if the stage is ACTIVE. When unfocused this loop must be interrupted using event "break_stage_inactive"
+			-- To break one loop use "break_stage_<STAGE.NAME>"
+
+			print("loop starting")
+			while true do
+				local e, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
+				print("Event input: "..e)
+				if e == "break_stage_"..settings.stageName then
+					log("i", "Broken stage "..settings.stageName)
+					break
+				elseif e == "break_stage_inactive" then
+					-- is this stage inactive? if so, break the loop
+					if not settings.active then break end
+				elseif settings.active then
+					-- On an action event, search the scenes nodes, if one was clicked, execute its action argument OR search the scenes
+					-- controller for it.
+
+					-- These events will only be responded to/acted upon if the stage is active (only one active at a time)
+					if e == "timer" then
+						if settings.timers[p1] then
+							local tmr = settings.timers[p1]
+							if tmr.parent ~= settings.name then print("false") else
+								tmr:oncomplete()
+								if tmr.rp then
+									new.createTimer( tmr.name, tmr.duration, tmr.oncomplete, tmr.rp )
+								end
+							end
+						end
+					elseif e == "mouse_drag" then handleDrag( e, p1, p2 )
+					elseif e == "mouse_scroll" then handleScroll( e, p1, p2, p3 )
+					elseif e == "key" then handleKey( e, p1, p2 )
+					elseif e == "char" then handleChar( e, p1 )
+					elseif e == "mouse_click" then handleClick( e, p1, p2, p3 )
+					elseif e == "terminate" and settings.allowTerminate then
+						term.setTextColor( colors.red )
+						print("Terminated stage "..settings.stageName)
+						term.setTextColor( colors.white )
+						log("i", "Stage "..settings.stageName.." has been terminated")
 						break
-					elseif e == "break_stage_inactive" then
-						-- is this stage inactive? if so, break the loop
-						if not settings.active then break end
 					end
 				end
 			end
-			setmetatable( settings, {__index=options} )
-			setmetatable( options, {__index=defaults} )
-			new = {}
-			new.setBackgroundColor = function( bg, r ) settings.backgroundColor = bg if not r then draw() end end
-			new.getBackgroundColor = function() return settings.backgroundColor end
-			new.setTextColor = function( tc, r ) settings.textColor = tc if not r then draw() end end
-			new.getTextColor = function() return settings.textColor end
-			new.setScene = function( scene ) settings.scene = scene draw() end
-			new.getScene = function() return settings.scene end
-			new.getEnable = function() return settings.enabled end
-			new.setEnable = function( e, r ) settings.enabled = e if not r then draw() end end
-			new.setVisible = function() end
-			new.getVisible = function() end
-			new.draw = function() draw() end
-			new.createTimer = function( name, duration, method, rep )
-				settings.timers = settings.timers or {}
+		end
+		setmetatable( settings, {__index=options} )
+		setmetatable( options, {__index=defaults} )
+		new = {}
+		new.setLevel = function( nLevel )
+			settings.level = nLevel
+		end
+		new.getLevel = function()
+			return settings.level
+		end
+		new.setBackgroundColor = function( bg, r ) settings.backgroundColor = bg if not r then draw() end end
+		new.getBackgroundColor = function() return settings.backgroundColor end
+		new.setTextColor = function( tc, r ) settings.textColor = tc if not r then draw() end end
+		new.getTextColor = function() return settings.textColor end
+		new.setScene = function( scene )
+			if type( scene ) ~= "table" then error("expected scene of type table, got "..tostring( type( scene ) ) ) end
+			-- First, check if this scene is already in use by another window.
 
-				settings.timers[ os.startTimer( duration ) ] = {
-					duration = duration,
-					oncomplete = method,
-					rp = rep,
-					name = name,
-					status = {
-						running = false,
-						startedWhen = false
-					},
-					parent = settings.name -- Only the caller stage responds. If the stage is removed the timer won't be resolved, therefore stage.removeAllTimers() should be called before removing the stage.
+			local isScenePresent = getScene( scene )
+			if isScenePresent and type(isScenePresent) == "table" and isScenePresent.parentStage then
+				local usingStage = getStage( isScenePresent.parentStage.stageName )
+				if usingStage then
+					-- another stage is using this scene. remove the scenes parent stage
+					usingStage.removeScene()
+				end
+			end
+
+			scene.parentStage = settings.stageName
+			settings.scene = scene
+			removeScene( scene )
+			addScene( scene )
+
+
+		end
+		new.focusHere = function()
+			-- 1. Find the currently active window, set it to inactive and redraw it.
+			-- 2. Reorder the buffer so this window is on top.
+			-- 3. Set this window to active, redraw on top and resume its coroutine.
+
+			-- Is this stage dead?
+
+
+		end
+		new.destroy = function()
+			new.removeAllTimers()
+			new.stop()
+			destroyStage()
+		end
+		new.removeScene = function()
+			-- unset the active scene.
+			local currentScene = getScene( settings.scene )
+			currentScene.parentStage = false
+			removeScene( currentScene )
+
+		end
+		new.getScene = function() return settings.scene end
+		new.getEnable = function() return settings.enabled end
+		new.setEnable = function( e, r ) settings.enabled = e if not r then draw() end end
+		new.setVisible = function() end
+		new.getVisible = function() end
+		new.draw = function() draw() end
+		new.createTimer = function( name, duration, method, rep )
+			settings.timers = settings.timers or {}
+
+			settings.timers[ os.startTimer( duration ) ] = {
+				duration = duration,
+				oncomplete = method,
+				rp = rep,
+				name = name,
+				status = {
+					running = false,
+					startedWhen = false
 				}
-			end
-			new.stopTimer = function( name )
-
-			end
-			new.getName = function() return settings.name end
-			new.start = function() print("started "..settings.name) loop() end
-			new.stop = function() os.queueEvent("break_stage_"..tostring(settings.name)) end
-			return new
+			}
 		end
-	}
-
-	clone.scene = {
-		-- view. Store nodes in [structure] field of scene object
-		load = function( path )
-			--[[
-				- Open path
-				- Load file
-				- Read File
-				- Find Node tags (<nodeName> </nodeName>)
-				- Store these Node tags in a table
-				- Loop each node tag, create the node and apply its settings.
-				- Return the new scene (including methods).
-			]]
-			local newScene = {}
-			setmetatable( newScene, {__index=sceneMethods})
-			local fileContent = file.getAll( path )
-			if not fileContent then error("Cannot find CCML file "..tostring( path )) end
-			local CCML, err = collect( fileContent )
-			local structure = {}
-			if CCML then
-				-- Loop each node, then loop within it and so on. Compile a list of all nodes.
+		new.stopTimer = function( name )
+			for k, v in pairs( settings.timers ) do
+				if v.name == name then
+					os.cancelTimer( k )
+					v.rp = false
+				end
+			end
+		end
+		new.removeAllTimers = function()
+			for k, v in pairs( settings.timers ) do
+				os.cancelTimer( k )
+			end
+		end
+		new.getTimers = function()
+			return settings.timers
+		end
+		new.getName = function() return settings.stageName end
+		new.register = function( self )
+			if not self then
+				error("Bad call: myStageVariable:register(). Note: A semicolon is required!")
+			end
+			addStage( self )
+			return self -- incase this attached onto a variable declaration
+		end
+		new.start = function( method )
+			print("started "..settings.stageName)
+			addStage( new )
+			if method then
+				parallel.waitForAll( loop, method )
 			else
-				error( err or "Could not parse CCML file" )
+				loop()
 			end
-			-- CCML contains each XML tag and its content. We need to assign a "parent" to each one
-		end,
-		create = function()
-			-- returns blank scene for build using procedural code.
-			new = {}
-			setmetatable( new, {__index=sceneMethods})
-			return new
 		end
-	}
+		new.stop = function( method ) 
+			os.queueEvent( "break_stage_"..tostring(settings.stageName) ) 
+			if method then method() end
+		end
+
+		new.exe = function( sName )
+			executeFunctionFromScene( sName )
+		end
+
+		return new
+	end
+
+	clone.scene = function( options )
+		checkRequirements( options, {"sceneName"})
+		local new  = {}
+		local settings = {}
+		local defaults = {}
+		local controller = {}
+		setmetatable( settings, {__index=options} )
+		setmetatable( options, {__index=defaults} )
+		--If path provided then load the DCML file
+
+		local function doesNodeExit( nodeName )
+			for k, v in ipairs( settings.nodes ) do
+				if v.name == nodeName then return true end
+			end
+			return false
+		end
+
+		local function checkControllerForEntry( sName )
+			if type( sName ) ~= "string" then error("Expected entry of type string, got "..tostring( type(sName)) ) end
+
+			for key, tDetails in ipairs( controller ) do
+				if tDetails.functionName == sName then
+					return true
+				end
+			end
+		end
+
+		local function getEntryFromController( sName )
+			for key, value in ipairs( controller ) do
+				if value.functionName == sName then
+					return value
+				end
+			end
+			return false
+		end
+
+		local function removeEntryFromController( sName )
+
+			for k, v in ipairs( controller ) do
+				if v.functionName == sName then
+					table.remove( controller, k )
+				end
+			end
+
+		end
+
+		local function addEntryToController( sFunction, fFunction )
+			removeEntryFromController( sFunction )
+			table.insert( controller, {
+				functionName = sFunction,
+				functionMethod = fFunction
+			})
+		end
+
+
+		new.addNode = function( node ) 
+			if not doesNodeExit( node.name ) then
+				-- does not already exist
+				table.insert( settings.nodes, node )
+				node.parentScene = options.name
+			end
+		end
+		new.addAllNodes = function( ... )
+			for key, node in ipairs( ... ) do
+				new.addNode( node )
+			end
+		end
+		new.getNodes = function() 
+			return settings.nodes
+		end
+		new.removeNode = function( nodeName ) 
+			for k, v in ipairs( settings.nodes ) do
+				if v.name == nodeName then
+					v.parentScene = nil
+					table.remove( settings.nodes, k ) 
+				end
+			end
+		end
+		new.removeAllNodes = function() 
+			for key, node in ipairs( settings.nodes ) do
+				node.parent = nil
+				table.remove( settings.nodes, key )
+			end
+		end
+
+		new.loadFromFile = function( path )
+			local file = clone.file.getAll( path )
+			if not file then error("Failed to load DCML file: "..tostring( path )) end
+			local content, err = collect( file )
+			if not content then error("Failed to parse DCML file: "..tostring( path ).." "..tostring(err)) end
+			-- We have the XML. If an element has an action event, then convert that to a function.
+			settings.loadedContent = {
+				dcml = content
+			}
+			log("i", "Successfully loaded DCML file from path "..tostring( path ))
+
+
+
+		end
+		new.reset = function() 
+			-- iffy
+		end
+
+		-- Controller functions
+
+		--[[
+			The controller is used to handle action events in DCML. When an onclick, onchange, ontype, onscroll is caught on the object, the function assigned is looked for here
+
+			Because not ALL functions may be in the Global Space (_G), checking said space is unpractical, so instead the developer can choose which functions can be accessed by the
+			file.
+
+			To add a function to the scenes controller, simply use .addToController( function Func ). Pass in the name of the function (how it will be reference in DCML) and the functions itself.
+			If the function is changed after being registered, DCML will call the original, therefore call <scene>.updateControllerItem( String functionName, function newFunction )
+
+			To add multiple functions to the controller use .addAllToController( function Func1, function Func2, ... etc )
+
+			In DCML simply reference the function using its name as a string.
+
+		]]
+
+		new.addToController = function( sFunctionName, sFunction )
+			removeEntryFromController( sFunctionName )
+			addEntryToController( sFunctionName, sFunction )
+		end
+
+		new.addAllToController = function( tFunctions )
+			if type( tFunctions ) ~= "table" then
+				error("Expected type table, got "..type( tFunctions )..". Cannot add functions to controller.")
+			end
+			-- tFunctions structure:
+			--[[
+			{
+				{
+					name = "name",
+					method = function() print("I am a method") end
+				},
+				{
+					name = "anotherName"
+					method = someMethodInMyMainProgram - NO PARENTHESES
+				}
+			}
+			]]
+			for key, node in ipairs( tFunctions ) do
+				if not node.name or not node.method then
+					error("In order to add multiple to controller the format must be: { name = 'referenceName', method = function }")
+				end
+				addEntryToController( node.name, node.method )
+			end
+		end
+
+		new.getAllFromController = function()
+			return controller
+		end
+
+		new.updateControllerItem = function( functionName, newFunction )
+			removeEntryFromController( functionName )
+			addEntryToController( functionName, newFunction )
+		end
+
+		new.getFromController = function( sName ) 
+			return getEntryFromController( sName )
+		end
+
+		new.removeFromController = function( sName )
+			removeEntryFromController( sName )
+		end
+
+		new.executeFunctionFromController = function( sName )
+			local func = getEntryFromController( sName )
+			if not func then return false elseif func then
+				func.functionMethod()
+				return true
+			end
+		end
+
+		new.removeAllFromController = function()
+			for k, v in ipairs( controller ) do
+				table.remove( controller, k )
+			end
+		end
+		return new
+	end
 
 	--[[
 		--==========--
@@ -402,14 +937,10 @@ function clone( options )
 			end
 		end,
 		write = function( path, content )
-			local h = clone.file.getHandle( path, "w" )
-			if h then
-				h.write( content )
-				h.close()
-				return true
-			else
-				return false
-			end
+			local h = fs.open( path, "w")
+			h.write( content )
+			h.close()
+			return true
 		end,
 		append = function( path, content )
 			local h = clone.file.getHandle( path, "a" )
@@ -422,14 +953,10 @@ function clone( options )
 			end
 		end,
 		writeLine = function( path, content )
-			local h = clone.file.getHandle( path, "r" )
-			if h then
-				h.writeLine( content )
-				h.close()
-				return true
-			else
-				return false
-			end
+			local h = fs.open( path, "r" )
+			h.writeLine( content )
+			h.close()
+			return true
 		end,
 		getLine = function( path )
 			local h = clone.file.getHandle( path, "r" )
@@ -483,11 +1010,31 @@ function clone( options )
 		--==========--
 	]]
 
-	clone.button = function()
-		local new = {}
-		new.draw = function()
+	clone.button = function( options )
+		local settings = {}
+		local defaults = {}
+		setmetatable( settings, {__index=options} )
+		setmetatable( options, {__index=defaults} )
+		local function draw()
 
 		end
+		local new = {}
+		new.draw = function() draw() end
+		new.getTextColor = function() return settings.textColor end
+		new.setTextColor = function() end
+		new.getBackgroundColor = function() return settings.backgroundColor end
+		new.setBackgroundColor = function() end
+		new.getToggle = function() return settings.toggle end
+		new.setToggle = function() end
+		new.getToggleState = function() return settings.toggleState end
+		new.setToggleState = function() end
+		new.getEnabled = function() return settings.enabled end
+		new.setEnabled = function() end
+		new.getDisabledBackgroundColor = function() return settings.disabledBackgroundColor end
+		new.setDisabledBackgroundColor = function() end
+		new.getDisabledTextColor = function() return settings.disabledTextColor end
+		new.setDisabledTextColor = function() end
+		return new
 	end
 
 	clone.textInput = function()
@@ -516,7 +1063,7 @@ function clone( options )
 		return instance.logging
 	end
 
-	clone.getLog = function( v )
+	clone.getLog = function()
 		-- Open the log file and return its contents.
 		return clone.file.getAll( instance.loggingPath )
 	end
