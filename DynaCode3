@@ -1,9 +1,18 @@
--- DynaCode V3... WOW, what about V1 and V2? HUSH!
+--[[
+
+	DynaCode Version 3
+	Inspired by JavaFX.
+
+	This is the framework developed by Harry Felton for use in all modern HexCode programs.
+
+	Copyright (c) 2015 Harry Felton, HexCode and all other contributors
+
+]]
 
 local apiCfg = {
 	keepUpToDate = true, -- Check for updates the first time a program is created using this version of the API. (.createProgram())
 	updatePath = "DynaCodeTEST", -- Where is the API installed
-	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode2", -- Path to download. This is set to my repository on GitHub.
+	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode3", -- Path to download. This is set to my repository on GitHub.
 	versionUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/version", -- Path to version file. This is set to my repository on GitHub.
 	versionPath = "DynaCodeVersion", -- Leave as is if you like, or change to a file (ideally in the same directory as DynaCode)
 	output = true, -- print information to the screen during update check
@@ -229,7 +238,7 @@ end
 
 function createProgram( options )
 	validateRequirements({ "name" }, options, false, "Missing requirements to initialize program:\n", "\nPlease define the above settings when creating your program instance")
-	if not updateChecked then
+	if not updateChecked and apiCfg.keepUpToDate then
 		-- check for updates now
 		checkAndProceed()
 		updateChecked = true
@@ -309,15 +318,65 @@ function createProgram( options )
 		end
 	end
 
+	local buffer = {
+
+		reorder = function( topLevel )
+			local temp = copy( objects.stages )
+
+			-- Set the topLevel stage to level 1
+			local i = 1
+			for key, stage in ipairs( temp ) do
+				if stage.getName() == topLevel then
+					stage:setBufferLevel( 1 )
+					i = 2
+					break
+				end
+			end
+			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+			for key, stage in ipairs( temp ) do
+				if stage.getName() ~= topLevel then
+					stage:setBufferLevel( i )
+					i = i + 1
+				end
+			end
+			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+
+		end,
+		redrawAll = function( ignoreRules ) 
+
+			for _, stage in ipairs( stageBuffer ) do
+				stage.draw()
+			end
+
+		end,
+		getHighestLevel = function( nX, nY )
+			-- return the first occurrence of a stage at the clicked co-ords. Because the table is sorted correctly, ipairs will result in the
+
+			for i = #stageBuffer, 1, -1 do -- loop table in reverse because the last node is drawn last and is therefore on top of others.
+				local stage = getStage( stageBuffer[i].getName() )
+				if stage then
+					local stageX, stageY = stage.getX(), stage.getY()
+					if nX >= stageX and nX <= stageX + stage.getWidth() - 1 and nY >= stageY and nY <= stageY + stage.getHeight() - 1 then
+						return stage
+					end
+				end
+			end
+		end
+	}
+
 	local function createBuffer()
 		local buffer = {}
 
 		return buffer
 	end
 
+	clone.bufferReorder = function( v )
+		buffer.reorder( v )
+	end
+
 	clone.createStage = function( cfg )
 
-		local stageDefaults = {}
+		local stageDefaults = { bufferLevel = 1 }
 		local new = {}
 		local settings = {}
 
@@ -368,7 +427,18 @@ function createProgram( options )
 
 		local function loop()
 			while true do
-
+				local e, p1, p2, p3, p4 = os.pullEventRaw()
+				if e == "mouse_click" then
+					handleMouseClick( e, p1, p2, p3 )
+				elseif e == "mouse_scroll" then
+					handleMouseScroll( e, p1, p2, p3 )
+				elseif e == "mouse_drag" then
+					handleMouseDrag( e, p1, p2, p3 )
+				elseif e == "key" then
+					handleKeyPress( e, p1, p2 )
+				elseif e == "char" then
+					handleCharPress( e, p1 )
+				end
 			end
 		end
 
@@ -377,7 +447,7 @@ function createProgram( options )
 			parallel.waitForAny( loop, function()
 				while true do
 					local e = os.pullEventRaw()
-					if e == "pause_stage_"..setting.name then
+					if e == "pause_stage_"..settings.name then
 						break
 					elseif e == "terminate_stage_"..settings.name then
 						-- break & remove the stage from the buffer.
@@ -391,6 +461,20 @@ function createProgram( options )
 		end
 
 		-- add this stage to the object storage.
+
+		new.setBufferLevel = function( self, v )
+			settings.bufferLevel = v
+		end
+		new.getBufferLevel = function( self )
+			return settings.bufferLevel
+		end
+
+		new.setExample = function( self, v )
+			settings.example = v
+		end
+		new.getExample = function( self )
+			return settings.example
+		end
 
 		new.getX = function( self )
 			return settings.x
@@ -522,6 +606,10 @@ function createProgram( options )
 			return settings.scene
 		end
 
+		new.start = function( self )
+			startStage()
+		end
+
 
 		registryUpdate( new ) --sets to registry.
 		return new
@@ -547,15 +635,15 @@ function createProgram( options )
 
 
 		local function registryUpdate( self )
-			for k, v in ipairs( objects.stages ) do
+			for k, v in ipairs( objects.scenes ) do
 				if v and type(v) == "table" then
 					if v:getName() == settings.name then
-						table.remove( objects.stages, k )
+						table.remove( objects.scenes, k )
 					end
 				end
 			end
 
-			table.insert( objects.stages, self )
+			table.insert( objects.scenes, self )
 		end
 
 
