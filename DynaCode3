@@ -1,9 +1,18 @@
--- DynaCode V3... WOW, what about V1 and V2? HUSH!
+--[[
+
+	DynaCode Version 3
+	Inspired by JavaFX.
+
+	This is the framework developed by Harry Felton for use in all modern HexCode programs.
+
+	Copyright (c) 2015 Harry Felton, HexCode and all other contributors
+
+]]
 
 local apiCfg = {
 	keepUpToDate = true, -- Check for updates the first time a program is created using this version of the API. (.createProgram())
 	updatePath = "DynaCodeTEST", -- Where is the API installed
-	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode2", -- Path to download. This is set to my repository on GitHub.
+	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode3", -- Path to download. This is set to my repository on GitHub.
 	versionUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/version", -- Path to version file. This is set to my repository on GitHub.
 	versionPath = "DynaCodeVersion", -- Leave as is if you like, or change to a file (ideally in the same directory as DynaCode)
 	output = true, -- print information to the screen during update check
@@ -229,17 +238,43 @@ end
 
 function createProgram( options )
 	validateRequirements({ "name" }, options, false, "Missing requirements to initialize program:\n", "\nPlease define the above settings when creating your program instance")
-	if not updateChecked then
+	if not updateChecked and apiCfg.keepUpToDate then
 		-- check for updates now
 		checkAndProceed()
 		updateChecked = true
 	end
 
-	local defaults = {}
+	local defaults = { backgroundColor = colors.black }
 
 	local objects = { -- program registry
-		scenes = {},
-		stages = {}
+		scenes = {}, -- not drawn, just here to be accessed.
+		stages = {}, -- drawn
+		dialogs = {}, -- drawn last. Not zbased.
+		buffer = {} -- compiled "order" of draw.
+	}
+
+	local filters = {
+		{
+			name = "NORMAL",
+			tbl = {
+				["white"] = colors.white,
+				["orange"] = colors.orange,
+				["magenta"] = colors.magenta,
+				["lightBlue"] = colors.lightBlue,
+				["yellow"] = colors.yellow,
+				["lime"] = colors.lime,
+				["pink"] = colors.pink,
+				["gray"] = colors.gray,
+				["lightGray"] = colors.lightGray,
+				["cyan"] = colors.cyan,
+				["purple"] = colors.purple,
+				["blue"] = colors.blue,
+				["brown"] = colors.brown,
+				["green"] = colors.green,
+				["red"] = colors.red,
+				["black"] = colors.black
+			}
+		}
 	}
 
 	local clone = {}
@@ -252,7 +287,53 @@ function createProgram( options )
 		if program.loggingReady then
 			local prefix = "Info"
 			if mode == "w" then prefix = "Warn" elseif mode == "e" then prefix = "ERROR" end
-			clone.file.append( program.loggingPath, "["..prefix.."] "..msg.."\n")
+			clone.file.append( program.loggingPath, "["..os.clock().."] ["..prefix.."] "..msg.."\n")
+		end
+	end
+
+	local function filterGet( name )
+		if not name then error("Expected string to fetch filter") end
+		for k, v in ipairs( filters ) do
+			if v.name == name then return v end
+		end
+		return false
+	end
+
+	local function filterRemove( name )
+		if not name then error("Expected string to remove filter") end
+		for k, v in ipairs( filters ) do
+			if v.name == name then
+				table.remove( k, filters )
+			end
+		end
+	end
+
+	local function filterAdd( name, tbl )
+		if not name or not tbl then
+			error("Expected argument of type string and table")
+		end
+		table.insert( filters, {
+			name = name,
+			tbl = tbl or {}
+		})
+	end
+
+	local function getColorFromFilter( filter, cl )
+		print( filter )
+		if not filter or not cl then
+			error("Expected filter string and color string to fetch color from filter.", 3)
+		end
+		local r = filterGet( filter )
+		if not r then
+			log("Filter not found in program instance: "..tostring(filter)..". Returning API color by default", "w")
+			r = colors
+		end
+		local c = r.tbl[cl]
+		if not c then
+			log("Cannot find color ("..tostring(cl)..") in filter, returning WHITE")
+			return colors.white
+		else
+			return c
 		end
 	end
 
@@ -303,23 +384,84 @@ function createProgram( options )
 		for k, v in ipairs( objects.stages ) do
 			if v and type( v ) == "table" and v.getName then
 				if v:getName() == nm then
-					return v
+					table.remove( objects.stages, k )
 				end
 			end
 		end
 	end
 
-	local function createBuffer()
-		local buffer = {}
+	local buffer = {
 
-		return buffer
+		reorder = function( topLevel )
+			local temp = copy( objects.stages )
+
+			-- Set the topLevel stage to level 1
+			local i = 1
+			for key, stage in ipairs( temp ) do
+				if stage.getName() == topLevel then
+					stage:setBufferLevel( 1 )
+					i = 2
+					break
+				end
+			end
+			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+			for key, stage in ipairs( temp ) do
+				if stage.getName() ~= topLevel then
+					stage:setBufferLevel( i )
+					i = i + 1
+				end
+			end
+			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+			objects.buffer = temp
+		end,
+		redrawAll = function( ignoreRules ) 
+
+			for _, stage in ipairs( objects.buffer ) do
+				stage.draw()
+			end
+
+		end,
+		getHighestLevel = function( nX, nY )
+			-- return the first occurrence of a stage at the clicked co-ords. Because the table is sorted correctly, ipairs will result in the
+
+			for i = #objects.buffer, 1, -1 do -- loop table in reverse because the last node is drawn last and is therefore on top of others.
+				local stage = registryFetch( objects.buffer[i].getName() )
+				if stage then
+					local stageX, stageY = stage.getX(), stage.getY()
+					if stage.getBorderless() then offset = 0 else offset = 1 end
+					if nX >= stageX and nX <= stageX + stage.getWidth() and nY >= stageY and nY <= stageY + stage.getHeight() + offset then
+						return stage
+					end
+				end
+			end
+		end
+	}
+
+	clone.bufferReorder = function( v )
+		buffer.reorder( v )
 	end
 
 	clone.createStage = function( cfg )
 
-		local stageDefaults = {}
+		local stageDefaults = { 
+			bufferLevel = 1,
+			active = false,
+			x = 2,
+			y = 2,
+			width = 20,
+			height = 10,
+			backgroundColor = "white",
+			lastClickX = 2,
+			lastClickY = 2,
+			closeButton = true,
+			closeButtonColor = "red",
+			closeButtonTextColor = "white",
+			topBarColor = "gray",
+			topBarDisabledColor = "lightGray",
+			filter = "NORMAL"
+		} -- manual settings override these
 		local new = {}
-		local settings = {}
+		local settings = {} -- overrides manual settings
 
 		setmetatable( stageDefaults, {__index = defaults})
 		setmetatable( cfg, {__index = stageDefaults} )
@@ -338,59 +480,118 @@ function createProgram( options )
 			table.insert( objects.stages, self )
 		end
 
+		local function getColor( cl )
+			local filter = filterGet( settings.filter )
+			if not filter then
+				log("Cannot find filter: "..tostring(settings.filter).." for stage: "..settings.name, w)
+			else
+				local c = filter.tbl[cl]
+				if c then
+					return c
+				end
+			end
+			return colors[cl] or cl or colors.white
+		end
+
 		local function draw()
-
+			if settings.borderless then
+				clone.canvas.drawArea( settings.x, settings.y, settings.width, settings.height, getColor( settings.backgroundColor ) )
+			else
+				clone.canvas.drawHLine( settings.x, settings.y, settings.width, getColor( settings.topBarColor ) )
+				clone.canvas.drawArea( settings.x, settings.y+1, settings.width, settings.height, getColor( settings.backgroundColor ) )
+			end
+			if settings.closeButton then
+				term.setBackgroundColor( getColor( settings.closeButtonColor ) )
+				term.setTextColor( getColor( settings.closeButtonTextColor ) )
+				term.setCursorPos( settings.x + settings.width, settings.y )
+				write("X")
+			end
+			term.setBackgroundColor( program.backgroundColor )
 		end
 
-		local function handleMouseClick( event, button, nX, nY )
+		local function handleMouseClick( self, event, button, nX, nY )
+			if nX == settings.x+settings.width and nY == settings.y and settings.closeButton then
+				self.destroy()
+				term.clear()
+				buffer.reorder()
+				buffer.redrawAll()
+			else
+				settings.lastClickX, settings.lastClickY = nX, nY
+			end
+		end
+		local function handleMouseScroll( self, event, direction, nX, nY )
 
 		end
-		local function handleMouseScroll( event, direction, nX, nY )
+		local function handleMouseDrag( self, event, button, nX, nY )
+			local termX, termY = term.getSize()
+			-- if the last click was on the top bar, then allow drag.
+			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y then
+				local oldX, oldY = settings.lastClickX, settings.lastClickY
+				if nX < settings.lastClickX and settings.x - 1 > 0 then
+					settings.x = settings.x - 1
+				elseif nX > settings.lastClickX and settings.x + settings.width < termX then
+					settings.x = settings.x + 1
+				elseif nY < settings.lastClickY and settings.y - 1 > 0 then
+					settings.y = settings.y - 1
+				elseif nY > settings.lastClickY and nY + settings.height < termY then
+					settings.y = settings.y + 1
+				end
+				if settings.y ~= oldY or settings.x ~= oldX then
+					term.clear()
+					buffer.redrawAll()
+				end
+				settings.lastClickX, settings.lastClickY = nX, nY
+			end
+		end
+		local function handleKeyPress( self, event, key, held )
 
 		end
-		local function handleMouseDrag( event, button, nX, nY )
-
-		end
-		local function handleKeyPress( event, key, held )
-
-		end
-		local function handleCharPress( event, key )
+		local function handleCharPress( self, event, key )
 
 		end
 
 		local function focus()
-
+			-- set all other stages to active = false.
+			settings.active = true
 		end
 
 		local function blur()
-
-		end
-
-		local function loop()
-			while true do
-
-			end
-		end
-
-		local function startStage()
-			-- run the loop and a stop catcher in parallel so that the loop will stop even if busy.
-			parallel.waitForAny( loop, function()
-				while true do
-					local e = os.pullEventRaw()
-					if e == "pause_stage_"..setting.name then
-						break
-					elseif e == "terminate_stage_"..settings.name then
-						-- break & remove the stage from the buffer.
-					end
-				end
-			end)
-		end
-
-		local function stopStage()
-
+			-- set all other stages to active = false.
+			settings.active = false
 		end
 
 		-- add this stage to the object storage.
+
+		new.draw = function( self )
+			if not registryFetch( settings.name ) then error("Stage must be built before drawing") end
+			draw()
+		end
+
+		new.setColorFilter = function( filterName )
+			settings.filter = filterName
+		end
+
+		new.test = function(cl)
+			print( getColor( cl ) )
+		end
+
+		new.getType = function() return "stage" end
+
+		new.getActive = function() return settings.active end
+
+		new.setBufferLevel = function( self, v )
+			settings.bufferLevel = v
+		end
+		new.getBufferLevel = function( self )
+			return settings.bufferLevel
+		end
+
+		new.setExample = function( self, v )
+			settings.example = v
+		end
+		new.getExample = function( self )
+			return settings.example
+		end
 
 		new.getX = function( self )
 			return settings.x
@@ -406,6 +607,8 @@ function createProgram( options )
 		new.setY = function( self, v ) 
 			settings.y = v
 		end
+		new.getWidth = function() return settings.width end
+		new.getHeight = function() return settings.height end
 
 		new.setBackgroundColor = function( self, v ) 
 			settings.backgroundColor = v
@@ -522,8 +725,50 @@ function createProgram( options )
 			return settings.scene
 		end
 
+		new.runEvent = function( self, e, p1, p2, p3, p4 )
+			-- if its not active, and the event was a mouse click, check if in bounds. If it isn't clicked on deactivate it, if it is activate it.
+			if e == "mouse_click" then
+				if settings.borderless then offset = 0 else offset = 1 end
+				if p2 >= settings.x and p2 <= settings.x + settings.width and p3 >= settings.y and p3 <= settings.y + settings.height + offset then
+					-- if the window is the highest level.
+					local high = buffer.getHighestLevel( p2, p3 )
+					if high and high:getName() == settings.name then
+						settings.active = true
+						buffer.reorder( settings.name ) --set this window to the top
+						buffer.redrawAll()
+					end
+				else
+					settings.active = false
+				end
+			end
+			if settings.active then
+				if e == "mouse_click" then
+					handleMouseClick( self, e, p1, p2, p3 )
+				elseif e == "mouse_scroll" then
+					handleMouseScroll( self, e, p1, p2, p3 )
+				elseif e == "mouse_drag" then
+					handleMouseDrag( self, e, p1, p2, p3 )
+				elseif e == "key" then
+					handleKeyPress( self, e, p1, p2 )
+					print( keys[p1] or p1 )
+				elseif e == "char" then
+					handleCharPress( self, e, p1 )
+				elseif e == "terminate" and settings.allowTerminate then
+					registryRemove( self, settings.name )
+				end
+			end
+		end
 
-		registryUpdate( new ) --sets to registry.
+		new.destroy = function( self )
+			-- if stage is in registry remove it, also stop loop
+			registryRemove( settings.name )
+		end
+
+		new.build = function( self )
+			-- add stage to registry
+			registryUpdate( self )
+		end
+
 		return new
 
 	end
@@ -547,17 +792,20 @@ function createProgram( options )
 
 
 		local function registryUpdate( self )
-			for k, v in ipairs( objects.stages ) do
+			for k, v in ipairs( objects.scenes ) do
 				if v and type(v) == "table" then
 					if v:getName() == settings.name then
-						table.remove( objects.stages, k )
+						table.remove( objects.scenes, k )
 					end
 				end
 			end
 
-			table.insert( objects.stages, self )
+			table.insert( objects.scenes, self )
 		end
 
+		new.getType = function() return "scene" end
+
+		new.getName = function() return settings.name end
 
 		new.relaceWithFile = function( self )
 
@@ -706,10 +954,32 @@ function createProgram( options )
 		return registryFetch( name )
 	end
 
-	clone.startAllStages = function( ... )
-		-- start each passed stage in parallel. Only break if all stages are complete.
-		parallel.waitForAll( ... )
+	clone.startWindows = function( callback )
+		-- starts each windows event loop.
+		-- When a stage is destroyed, it will be stopped and must be "rebuilt" in order to function again.
+		local function exeOnEach( e, p1, p2, p3, p4 )
+			for _, stage in ipairs( objects.stages ) do
+				stage:runEvent( e, p1, p2, p3, p4 )
+			end
+		end
+		local function loop()
+			while true do
+				local e, p1, p2, p3, p4 = os.pullEventRaw()
+				if e == "program_stop"..program.name then
+					break
+				else
+					exeOnEach( e, p1, p2, p3, p4 )
+				end
+			end
+		end
+		if callback and type( callback ) == "function" then
+			parallel.waitForAll( loop, callback )
+		else
+			loop()
+		end
 	end
+
+	clone.getObjects = function() return objects end
 
 	clone.file = {
 		getHandle = function( path, mode )
@@ -720,7 +990,7 @@ function createProgram( options )
 			end
 		end,
 		write = function( path, content )
-			local h = fs.open( path, "w")
+			local h = fs.open( path, "w" )
 			h.write( content )
 			h.close()
 			return true
@@ -763,18 +1033,53 @@ function createProgram( options )
 		end
 	}
 
+	clone.createFilter = function( name, tbl ) filterAdd( name, tbl ) end
+
+	clone.getFilterObject = function( name )
+		return filterGet( name )
+	end
+
+	clone.getColorFromFilter = function( filter, cl )
+		return getColorFromFilter( filter, cl )
+	end
+
 	clone.canvas = {
-		drawArea = function() end,
-		drawHLine = function() end,
-		drawVLine = function() end,
+		drawArea = function( nX, nY, width, height, background )
+			if height < 1 or width < 1 then
+				error("Height and width must be greater than 1 to draw a box")
+			end
+			for i = nY, nY + height do
+				clone.canvas.drawHLine( nX, i, width, background )
+			end
+		end,
+		drawHLine = function( nX, nY, width, background )
+			paintutils.drawLine( nX, nY, nX+width, nY, background )
+		end,
+		drawVLine = function( nX, nY, height, background )
+			paintutils.drawLine( nX, nY, nX, nY+height, background )
+		end,
 		drawText = function() end,
 		drawCText = function() end
 	}
 
-	clone.color = {
-		getFilter = function() end,
-		setFilter = function() end,
-		getColor = function() end
+	clone.remote = {
+		fetch = function( url )
+			for i = 1, 3 do
+				local response = http.get( url )
+				if response then
+					return response
+				end
+			end
+			return false
+		end,
+		fetchLine = function( url )
+			local response = clone.remote.fetch( url )
+			if not response then return false else return response.readLine() end
+		end,
+		fetchAll = function( url )
+			local response = clone.remote.fetch( url )
+			if not response then return false else return response.readAll() end
+		end
 	}
 
 	return clone
