@@ -17,7 +17,7 @@
 ]]
 
 if not term.isColor() or not term.isColor then
-	error("DynaCode V2 Requires advanced (gold) computer running ComputerCraft 1.5+")
+	error("DynaCode V2 Requires advanced (gold) computer running ComputerCraft 1.5+") --may be out of date PC (pre-color support) or a standard PC (no color support)
 end
 
 local update = {
@@ -33,7 +33,9 @@ local update = {
 --[[
 
 NOTE: Do not edit past this point **unless** you understand what you are doing.
-If you experience crashes after changing ANY (AT ALL!) code, DO NOT REPORT. Re-download DynaCode or revert
+If you experience crashes after changing ANY (AT ALL!) code, DO NOT REPORT. 
+
+Re-download DynaCode or revert
 your changes, then try to reproduce the error WITHOUT editing source code. Then and only then will
 your report be addressed.
 
@@ -118,7 +120,6 @@ local function updateCheck()
 				term.setTextColor( colors.orange )
 				uPrint("New update available, fetching")
 				term.setTextColor( colors.white )
-				-- perform update
 				for nI = 1, 3 do
 					uPrint("Fetching update. Attempt ", nI, " of ", 3)
 					local updateResponse = http.get( update.updateUrl )
@@ -465,20 +466,20 @@ function clone( options )
 
 	local function removeStage( v )
 		for key, stage in ipairs( stages ) do
-			if stage == v or stage.getName() == v.name then
+			if stage.getName() == v then
 				table.remove( stages, key )
 			end
 		end
 	end
 
 	local function addStage( stage )
-		removeStage( stage )
+		removeStage( stage.getName() )
 		table.insert( stages, stage )
 	end
 
 	local buffer = {
 
-		reorder = function( toplevel ) 
+		reorder = function( toplevel )
 			-- The buffer is a table populated by stages. DynaCode works out which window is on top by iterating the table using the value as a base.
 			-- First, loop the buffer, and create a list of levels. We will use this list to loop through the buffer later and preserve the levels of previous stages.
 			local structure = copy( stages )
@@ -487,32 +488,47 @@ function clone( options )
 			local i = 1
 			for key, item in ipairs( structure ) do
 				if item.getName() == toplevel then
-					item.setLevel(1) -- set to locally
+					item:setLevel(1) -- set to locally
 					local tempStage = getStage( toplevel )
-					if not tempStage then error("Stage set in buffer, but not in dictionary") end
-					tempStage.setLevel(1) -- because structure is a copy, we need to save changes we make to the instance stages.
+					if not tempStage then error("Stage not in dictionary: "..item.getName()) end
+					tempStage:setLevel(1) -- because structure is a copy, we need to save changes we make to the instance stages.
 					i = 2
 				end
 			end
 			table.sort(structure, function( a, b ) return a.getLevel() > b.getLevel() end)
 			for key, item in ipairs( structure ) do
 				if item.getName() ~= toplevel then
-					item.setLevel( i )
+					item:setLevel( i )
 					local tempStage = getStage( item.getName() )
-					if not tempStage then error("Stage set in buffer, but not in dictionary: "..item.getName()) end
-					tempStage.setLevel( i )
+					if not tempStage then error("Stage not in dictionary: "..item.getName()) end
+					tempStage:setLevel( i )
 					i = i + 1
 				end
 			end
 			table.sort(structure, function( a, b ) return a.getLevel() > b.getLevel() end)
-
 			stageBuffer = structure
-			for k, v in ipairs( stageBuffer ) do
-				print( v.getLevel() .. ":: " .. v.getName() )
+
+		end,
+		redrawAll = function( ignoreRules ) 
+
+			for _, stage in ipairs( stageBuffer ) do
+				stage.draw()
 			end
 
 		end,
-		redrawAll = function( ignoreRules ) end,
+		getHighestLevel = function( nX, nY )
+			-- return the first occurrence of a stage at the clicked co-ords. Because the table is sorted correctly, ipairs will result in the
+
+			for i = #stageBuffer, 1, -1 do -- loop table in reverse because the last node is drawn last and is therefore on top of others.
+				local stage = getStage( stageBuffer[i].getName() )
+				if stage then
+					local stageX, stageY = stage.getX(), stage.getY()
+					if nX >= stageX and nX <= stageX + stage.getWidth() - 1 and nY >= stageY and nY <= stageY + stage.getHeight() - 1 then
+						return stage
+					end
+				end
+			end
+		end
 	}
 
 	clone.bufferReorder = function( preference )
@@ -532,21 +548,51 @@ function clone( options )
 		local defaults = {
 			windowed = false,
 			allowTerminate = false,
-			level = 1
+			level = 1,
+			x = 2,
+			y = 2,
+			width = 10,
+			height = 5,
+			borderless = false,
+			backgroundColor = colors.lightGray,
+			allowClose = true
 		}
+		local alerts = {}
 
 		-- A stage represents a window, nodes (elements) can be added to this window and are subject to its terms.
 		--[[
 			@return table
 		]]
-		local settings = { active = true, timers = {}, co = false } --settings are now private and must be accessed via methods.
+		local settings = { active = true, timers = {} } --settings are now private and must be accessed via methods.
 
 		--[[
 			A stages loop is run in a Coroutine, meaning each stage runs independently from each other and shares only events.
 		]]
 
+		local function update( sSetting, _value, fMethod, isSecond ) end
+
 		local function draw()
 			-- Clear the area using the backgroundColor. Then loop each node and call its draw function (node.draw)
+			if not settings.borderless then
+				clone.canvas.drawHorizontalLine( settings.x, settings.y, settings.width-1, colors.white )
+				term.setBackgroundColor( colors.white )
+				term.setCursorPos( settings.x, settings.y )
+				term.setTextColor( colors.black )
+				write( settings.stageName )
+				if settings.active then
+					write(" [active]")
+				else
+					write(" [inactive]")
+				end
+				if settings.allowClose then
+					term.setBackgroundColor( colors.red )
+					term.setCursorPos( settings.x+settings.width-1, settings.y )
+					write( "X" )
+				end
+				clone.canvas.drawArea( settings.x, settings.y+1, settings.width, settings.height, settings.backgroundColor )
+			else
+				clone.canvas.drawArea( settings.x, settings.y, settings.width, settings.height, colors.red )
+			end
 		end
 		local function executeFunctionFromScene( sName )
 			if not settings.scene then error("No scene set to this stage. Use stage.setScene()") end
@@ -556,41 +602,138 @@ function clone( options )
 		end
 
 		local function handleClick( event, nButton, nX, nY )
-			print("Event received: "..tostring( event ))
+			-- First, check if the click co-ords were on a node.
+			-- Then check if the click co-ords were on the top of the window.
+			local highest = buffer.getHighestLevel( nX, nY )
+			if not highest or highest.getName() ~= settings.stageName then
+				-- this window is not the target.
+				settings.active = false
+				buffer.redrawAll()
+				return
+			end
+			term.setTextColor( colors.white )
+			term.setBackgroundColor( colors.black )
+			local st = getStage( settings.stageName )
+			if not st then error("dead stage") end
+			st:setLastClick( nX, nY )
+			if nX >= settings.x and nX <= settings.x+settings.width-1 and nY == settings.y and not settings.borderless then
+				--error("Top bar clicked")
+				if nX == settings.x+settings.width-1 and nY == settings.y and settings.allowClose then
+					os.queueEvent( "break_stage_"..tostring(settings.stageName) )
+				end
+			else
+				-- is on clicked element?
+				-- To check, loop scene nodes.
+				local clicked, nodes = false, false
+				if settings.scene then
+					nodes = settings.scene.getNodes()
+				end
+				if nodes and type( nodes ) == "table" and #nodes > 0 then
+					for _, node in ipairs( settings.scene.getNodes() ) do
+						if nX >= node.getX() and nX <= node.getX() and nY >= node.getY() and nY <= node.getY() then
+							clicked = true
+							error("Node "..node.getName().." clicked")
+						end
+					end
+				end
+			end
+			--buffer.redrawAll()
 		end
 
-		local function handleScroll( event, nDirection, nX, nY )
-			print("Event received: "..tostring( event ))
+		local function handleScroll( event, nDirection, nX, nY ) end
+
+		local function handleDrag( event, button, nX, nY )
+			local stage = getStage( settings.stageName )
+			if not stage then
+				error("This stage is dead")
+			elseif stage then
+				-- if the last click (drag start) was on the top bar, or the very top of the screen (borderless), allow drag
+				local lastX, lastY = stage.getLastClick()
+				if not stage.getBorderless() then
+					if lastY ~= stage.getY() then
+						return
+					end
+				end
+				local cX, cY, redraw = stage.getX(), stage.getY(), false
+				local termX, termY = term.getSize()
+				if nX > lastX then
+					local newX = cX + 1
+					if newX + stage.getWidth() - 1 > termX then
+						newX = cX
+					else
+						redraw = true
+					end
+					stage:setX( newX )
+				elseif nX < lastX then
+					local newX = cX - 1
+					if newX < 1 then
+						newX = 1
+					else
+						redraw = true
+					end
+					stage:setX( newX )
+				end
+				if nY > lastY then
+					local newY = cY + 1
+					if newY + stage.getHeight() > termY then
+						newY = cY
+					else
+						redraw = true
+					end
+					stage:setY( newY )
+				elseif nY < lastY then
+					local newY = cY - 1
+					if newY < 1 then
+						newY = 1
+					else
+						redraw = true
+					end
+					stage:setY( newY )
+				end
+				stage:setLastClick( nX, nY )
+				if redraw then
+					term.setBackgroundColor( colors.black )
+					term.clear()
+					buffer.reorder( stage.getName() )
+					buffer.redrawAll()
+				end
+			end
 		end
 
-		local function handleDrag( event, nX, nY )
-			print("Event received: "..tostring( event ))
-		end
+		local function handleKey( event, kKey, bHeld ) end
 
-		local function handleKey( event, kKey, bHeld )
-			print("Event received: "..tostring( event ))
-		end
-
-		local function handleChar( event, char )
-			print("Event received: "..tostring( event ))
-		end
+		local function handleChar( event, char ) end
 
 		local function loop()
 			-- Each stage has an event loop. Any events fired will only affect the current stage (last clicked)
 			-- this loop must ONLY be running if the stage is ACTIVE. When unfocused this loop must be interrupted using event "break_stage_inactive"
-			-- To break one loop use "break_stage_<STAGE.NAME>"
+			-- To break one loop use "break_stage_<STAGE.stageName>"
 
-			print("loop starting")
 			while true do
 				local e, p1, p2, p3, p4, p5, p6 = os.pullEventRaw()
-				print("Event input: "..e)
+				local currentActive = settings.active
+				if e == "mouse_click" then
+					local high = buffer.getHighestLevel( p2, p3 )
+					if high and type( high ) == "table" then
+						if high.getName() == settings.stageName then
+							settings.active = true
+							buffer.reorder( settings.stageName )
+							buffer.redrawAll()
+						end
+					end
+				end
 				if e == "break_stage_"..settings.stageName then
 					log("i", "Broken stage "..settings.stageName)
+					removeStage( settings.stageName )
+					buffer.reorder()
+					term.setBackgroundColor( colors.black )
+					term.clear()
+					buffer.redrawAll()
 					break
 				elseif e == "break_stage_inactive" then
 					-- is this stage inactive? if so, break the loop
 					if not settings.active then break end
-				elseif settings.active then
+				elseif currentActive then
 					-- On an action event, search the scenes nodes, if one was clicked, execute its action argument OR search the scenes
 					-- controller for it.
 
@@ -598,14 +741,14 @@ function clone( options )
 					if e == "timer" then
 						if settings.timers[p1] then
 							local tmr = settings.timers[p1]
-							if tmr.parent ~= settings.name then print("false") else
+							if tmr.parent == settings.name then
 								tmr:oncomplete()
 								if tmr.rp then
 									new.createTimer( tmr.name, tmr.duration, tmr.oncomplete, tmr.rp )
 								end
 							end
 						end
-					elseif e == "mouse_drag" then handleDrag( e, p1, p2 )
+					elseif e == "mouse_drag" then handleDrag( e, p1, p2, p3 )
 					elseif e == "mouse_scroll" then handleScroll( e, p1, p2, p3 )
 					elseif e == "key" then handleKey( e, p1, p2 )
 					elseif e == "char" then handleChar( e, p1 )
@@ -615,6 +758,8 @@ function clone( options )
 						print("Terminated stage "..settings.stageName)
 						term.setTextColor( colors.white )
 						log("i", "Stage "..settings.stageName.." has been terminated")
+						removeStage( settings.stageName )
+						buffer.reorder()
 						break
 					end
 				end
@@ -622,18 +767,68 @@ function clone( options )
 		end
 		setmetatable( settings, {__index=options} )
 		setmetatable( options, {__index=defaults} )
+
 		new = {}
-		new.setLevel = function( nLevel )
+		new.setLastClick = function( self, nX, nY )
+			settings.lastX, settings.lastY = nX, nY
+			addStage( self )
+		end
+		new.getLastClick = function()
+			return settings.lastX, settings.lastY
+		end
+		new.setBorderless = function( self, bV )
+			settings.borderless = bV
+			addStage( self )
+		end
+		new.getBorderless = function() return settings.borderless end
+		new.setCanClose = function( self, bClose )
+			settings.allowClose = bClose
+			addStage( self )
+		end
+		new.getCanClose = function() return settings.allowClose end
+		new.setLevel = function( self, nLevel, secondary )
 			settings.level = nLevel
+			addStage( self )
+			--update( "level", nLevel, "setLevel", secondary)
+			-- every time a setter is used, get the copy from the stages table, and apply the setting their too.
 		end
 		new.getLevel = function()
 			return settings.level
+		end
+		new.getX = function()
+			return settings.x
+		end
+		new.setX = function( self, v, secondary )
+			settings.x = v
+			addStage( self )
+			buffer.reorder( self.getName() )
+		end
+		new.getY = function()
+			return settings.y
+		end
+		new.setY = function( self, v, secondary )
+			settings.y = v
+			addStage( self )
+		end
+		new.getWidth = function()
+			return settings.width
+		end
+		new.setWidth = function( self, v, secondary )
+			settings.width = v
+			addStage( self )
+		end
+		new.getHeight = function()
+			return settings.height
+		end
+		new.setHeight = function( self, v, secondary )
+			settings.height = v
+			addStage( self )
 		end
 		new.setBackgroundColor = function( bg, r ) settings.backgroundColor = bg if not r then draw() end end
 		new.getBackgroundColor = function() return settings.backgroundColor end
 		new.setTextColor = function( tc, r ) settings.textColor = tc if not r then draw() end end
 		new.getTextColor = function() return settings.textColor end
-		new.setScene = function( scene )
+		new.setScene = function( self, scene, secondary )
 			if type( scene ) ~= "table" then error("expected scene of type table, got "..tostring( type( scene ) ) ) end
 			-- First, check if this scene is already in use by another window.
 
@@ -648,24 +843,10 @@ function clone( options )
 
 			scene.parentStage = settings.stageName
 			settings.scene = scene
-			removeScene( scene )
+			addStage( self )
 			addScene( scene )
 
 
-		end
-		new.focusHere = function()
-			-- 1. Find the currently active window, set it to inactive and redraw it.
-			-- 2. Reorder the buffer so this window is on top.
-			-- 3. Set this window to active, redraw on top and resume its coroutine.
-
-			-- Is this stage dead?
-
-
-		end
-		new.destroy = function()
-			new.removeAllTimers()
-			new.stop()
-			destroyStage()
 		end
 		new.removeScene = function()
 			-- unset the active scene.
@@ -716,19 +897,22 @@ function clone( options )
 				error("Bad call: myStageVariable:register(). Note: A semicolon is required!")
 			end
 			addStage( self )
-			return self -- incase this attached onto a variable declaration
+			return self -- if :register() is attached onto a variable declaration, then returning self will allow the declaration to work (not set to nil)
 		end
 		new.start = function( method )
-			print("started "..settings.stageName)
-			addStage( new )
 			if method then
-				parallel.waitForAll( loop, method )
+				parallel.waitForAll( function()
+					loop()
+					removeStage( settings.stageName )
+					buffer.reorder()
+				end, method )
 			else
 				loop()
 			end
+			
 		end
 		new.stop = function( method ) 
-			os.queueEvent( "break_stage_"..tostring(settings.stageName) ) 
+			os.queueEvent( "break_stage_"..tostring(settings.stageName) )
 			if method then method() end
 		end
 
@@ -742,7 +926,7 @@ function clone( options )
 	clone.scene = function( options )
 		checkRequirements( options, {"sceneName"})
 		local new  = {}
-		local settings = {}
+		local settings = { nodes = {} }
 		local defaults = {}
 		local controller = {}
 		setmetatable( settings, {__index=options} )
@@ -834,9 +1018,6 @@ function clone( options )
 				dcml = content
 			}
 			log("i", "Successfully loaded DCML file from path "..tostring( path ))
-
-
-
 		end
 		new.reset = function() 
 			-- iffy
@@ -928,6 +1109,23 @@ function clone( options )
 		--==========--
 	]]
 
+	clone.canvas = {
+		drawArea = function( nX, nY, width, height, background )
+			if height < 1 or width < 1 then
+				error( "Cannot draw area with 0< width or height.")
+			end
+			for x = 0, width-1 do
+				clone.canvas.drawVerticalLine( nX+x, nY, height-1, background )
+			end
+		end,
+		drawVerticalLine = function( nX, nY, height, background ) 
+			paintutils.drawLine( nX, nY, nX, nY+height, background )
+		end,
+		drawHorizontalLine = function( nX, nY, width, background ) 
+			paintutils.drawLine( nX, nY, nX+width, nY, background )
+		end
+	}
+
 	clone.file = {
 		getHandle = function( path, mode )
 			if fs.exists( path ) then
@@ -979,23 +1177,23 @@ function clone( options )
 			end
 		end
 	}
-	wireless = {
+	clone.wireless = {
 		-- RedNet
 	}
 
-	remote = {
+	clone.remote = {
 		-- HTTP
 	}
 
-	redstone = {
+	clone.redstone = {
 		
 	}
 
-	monitor = {
+	clone.monitor = {
 		
 	}
 
-	peripheral = {
+	clone.peripheral = {
 		
 	}
 
@@ -1047,6 +1245,37 @@ function clone( options )
 
 	clone.list = function()
 		
+	end
+
+	clone.paragraph = function( options )
+		local new = {}
+		local settings = {}
+		local defaults = {}
+		setmetatable( settings, {__index=options})
+		setmetatable( options, {__index=defaults})
+
+		new.draw = function()
+			-- Each object has its own custom draw function.
+		end
+		new.getBackgroundColor = function()
+			return settings.backgroundColor
+		end
+		new.setBackgroundColor = function( v )
+			settings.backgroundColor = v
+		end
+		new.getTextColor = function()
+			return settings.textColor
+		end
+		new.setTextColor = function( v )
+			settings.textColor = v
+		end
+		new.getText = function()
+			return settings.text
+		end
+		new.setText = function( v )
+			settings.text = v
+		end
+
 	end
 
 	--[[

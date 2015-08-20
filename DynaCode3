@@ -7,6 +7,17 @@
 
 	Copyright (c) 2015 Harry Felton, HexCode and all other contributors
 
+	Current To-Do (* = doing now):
+	- Limited buffer redraw (only redraws what is needed)*
+	- Button Nodes
+	- Scenes
+
+	Upcoming To-Do:
+	- DCML Expansion and conversion to nodes.
+	- Text Node (wrapping text)
+	- Scroll List, List node
+	- Display List (context menu style)
+
 ]]
 
 local apiCfg = {
@@ -244,7 +255,9 @@ function createProgram( options )
 		updateChecked = true
 	end
 
-	local defaults = { backgroundColor = colors.black }
+	local termX, termY = term.getSize()
+
+	local defaults = { backgroundColor = colors.black, debug = true, debugWait = false, debugPauseOnException = true, catchErrors = true, customErrorCB }
 
 	local objects = { -- program registry
 		scenes = {}, -- not drawn, just here to be accessed.
@@ -274,6 +287,27 @@ function createProgram( options )
 				["red"] = colors.red,
 				["black"] = colors.black
 			}
+		},
+		{
+			name = "_UNFOCUSED",
+			tbl = {
+				["white"] = colors.lightGray,
+				["orange"] = colors.lightGray,
+				["magenta"] = colors.lightGray,
+				["lightBlue"] = colors.lightGray,
+				["yellow"] = colors.gray,
+				["lime"] = colors.lightGray,
+				["pink"] = colors.lightGray,
+				["gray"] = colors.gray,
+				["lightGray"] = colors.lightGray,
+				["cyan"] = colors.lightGray,
+				["purple"] = colors.lightGray,
+				["blue"] = colors.lightGray,
+				["brown"] = colors.lightGray,
+				["green"] = colors.lightGray,
+				["red"] = colors.lightGray,
+				["black"] = colors.gray
+			}
 		}
 	}
 
@@ -284,10 +318,27 @@ function createProgram( options )
 	-- Each function will use the @self argument to adjust its own settings.
 
 	local function log( msg, mode )
-		if program.loggingReady then
+		if program.loggingReady and program.logging then
 			local prefix = "Info"
 			if mode == "w" then prefix = "Warn" elseif mode == "e" then prefix = "ERROR" end
 			clone.file.append( program.loggingPath, "["..os.clock().."] ["..prefix.."] "..msg.."\n")
+		end
+		if program.debug then
+			if mode == "w" or mode == "e" then term.setTextColor( colors.red ) end
+			term.setBackgroundColor( colors.black )
+			print( "DEBUG OUTPUT: "..tostring( msg ) )
+			term.setTextColor( colors.white )
+			if program.debugWait and ( mode == "i" or not mode ) then sleep( program.debugWait ) end
+			if program.debugPauseOnException then
+				if mode == "w" then
+					-- pause
+					print("Warning Caught - Press any key to continue")
+					os.pullEventRaw()
+				elseif e == "e" then
+					print("Exception Caught - Press any key to continue")
+					os.pullEventRaw()
+				end
+			end
 		end
 	end
 
@@ -319,18 +370,20 @@ function createProgram( options )
 	end
 
 	local function getColorFromFilter( filter, cl )
-		print( filter )
 		if not filter or not cl then
 			error("Expected filter string and color string to fetch color from filter.", 3)
 		end
 		local r = filterGet( filter )
+		local c
 		if not r then
 			log("Filter not found in program instance: "..tostring(filter)..". Returning API color by default", "w")
 			r = colors
+			c = r[cl]
+		else
+			c = r.tbl[cl]
 		end
-		local c = r.tbl[cl]
 		if not c then
-			log("Cannot find color ("..tostring(cl)..") in filter, returning WHITE")
+			log("Cannot find color ("..tostring(cl)..") in filter, returning WHITE", "w")
 			return colors.white
 		else
 			return c
@@ -413,9 +466,10 @@ function createProgram( options )
 			end
 			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
 			objects.buffer = temp
+			log("Reordered Buffer")
 		end,
-		redrawAll = function( ignoreRules ) 
-
+		redrawAll = function( ignoreRules )
+			log("Redrawing all objects")
 			for _, stage in ipairs( objects.buffer ) do
 				stage.draw()
 			end
@@ -434,8 +488,33 @@ function createProgram( options )
 					end
 				end
 			end
+		end,
+		drawBounds = function( sX, sY, eX, eY )
+			-- sX and sY, startX and startY.
+			-- eX and eY, endX and endY.
+			-- Draw these pixels on the windows.
+
+			-- First, clear the area by drawing a box.
+			clone.drawing.drawArea( sX, sY, sX-eX, sY-eY, colors.red )
+			local bounds = {}
+			-- Now, order the windows to redraw the bounds given.
+			for k, v in ipairs( objects.stages ) do
+				v:drawBounds( bounds )
+			end
 		end
 	}
+
+	clone.bufferRedrawAll = function()
+		buffer.redrawAll()
+	end
+
+	clone.setDebug = function( v )
+		program.debug = v
+	end
+
+	clone.setDebugSleep = function( v ) program.debugWait = v end
+
+	clone.setDebugPauseOnException = function( v ) program.debugPauseOnException = v end
 
 	clone.bufferReorder = function( v )
 		buffer.reorder( v )
@@ -458,7 +537,9 @@ function createProgram( options )
 			closeButtonTextColor = "white",
 			topBarColor = "gray",
 			topBarDisabledColor = "lightGray",
-			filter = "NORMAL"
+			filter = "NORMAL",
+			moveable = true,
+			fullscreen = false
 		} -- manual settings override these
 		local new = {}
 		local settings = {} -- overrides manual settings
@@ -481,7 +562,12 @@ function createProgram( options )
 		end
 
 		local function getColor( cl )
-			local filter = filterGet( settings.filter )
+			local filter
+			if settings.active then
+				filter = filterGet( settings.filter )
+			else
+				filter = filterGet( "_UNFOCUSED" )
+			end
 			if not filter then
 				log("Cannot find filter: "..tostring(settings.filter).." for stage: "..settings.name, w)
 			else
@@ -501,8 +587,8 @@ function createProgram( options )
 				clone.canvas.drawArea( settings.x, settings.y+1, settings.width, settings.height, getColor( settings.backgroundColor ) )
 			end
 			if settings.closeButton then
-				term.setBackgroundColor( getColor( settings.closeButtonColor ) )
-				term.setTextColor( getColor( settings.closeButtonTextColor ) )
+				term.setBackgroundColor( getColorFromFilter( settings.filter, settings.closeButtonColor ) )
+				term.setTextColor( getColorFromFilter( settings.filter, settings.closeButtonTextColor ) )
 				term.setCursorPos( settings.x + settings.width, settings.y )
 				write("X")
 			end
@@ -525,7 +611,7 @@ function createProgram( options )
 		local function handleMouseDrag( self, event, button, nX, nY )
 			local termX, termY = term.getSize()
 			-- if the last click was on the top bar, then allow drag.
-			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y then
+			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y and settings.moveable and settings.active then
 				local oldX, oldY = settings.lastClickX, settings.lastClickY
 				if nX < settings.lastClickX and settings.x - 1 > 0 then
 					settings.x = settings.x - 1
@@ -560,6 +646,16 @@ function createProgram( options )
 			settings.active = false
 		end
 
+		new.setCloseCallback = function( self, callback )
+			if not self or not ( type( self ) == "table" and self.getType and self.getType() == "stage" ) or not callback then
+				error("Expected table SELF of type stage and callback function")
+			end
+			if self.getName() ~= settings.name then
+				error("Passed self does not match this stage")
+			end
+			settings.onCloseCB = callback
+		end
+
 		-- add this stage to the object storage.
 
 		new.draw = function( self )
@@ -569,10 +665,6 @@ function createProgram( options )
 
 		new.setColorFilter = function( filterName )
 			settings.filter = filterName
-		end
-
-		new.test = function(cl)
-			print( getColor( cl ) )
 		end
 
 		new.getType = function() return "stage" end
@@ -624,11 +716,18 @@ function createProgram( options )
 			return settings.borderless
 		end
 
-		new.setCloseable = function( self, v ) 
-			settings.closeable = v
+		new.setCloseButton = function( self, v ) 
+			settings.closeButton = v
 		end
-		new.getCloseable = function( self ) 
-			return setting.closeable
+		new.getCloseButton = function( self ) 
+			return setting.closeButton
+		end
+
+		new.getFullscreen = function( self ) 
+			return settings.fullscreen 
+		end
+		new.setFullscreen = function( self, v ) 
+			settings.fullscreen = v 
 		end
 
 		new.setMoveable = function( self, v ) 
@@ -727,17 +826,18 @@ function createProgram( options )
 
 		new.runEvent = function( self, e, p1, p2, p3, p4 )
 			-- if its not active, and the event was a mouse click, check if in bounds. If it isn't clicked on deactivate it, if it is activate it.
+			local edited
 			if e == "mouse_click" then
+				local high = buffer.getHighestLevel( p2, p3 )
 				if settings.borderless then offset = 0 else offset = 1 end
-				if p2 >= settings.x and p2 <= settings.x + settings.width and p3 >= settings.y and p3 <= settings.y + settings.height + offset then
+				if p2 >= settings.x and p2 <= settings.x + settings.width and p3 >= settings.y and p3 <= settings.y + settings.height + offset and not settings.active then
 					-- if the window is the highest level.
-					local high = buffer.getHighestLevel( p2, p3 )
 					if high and high:getName() == settings.name then
 						settings.active = true
 						buffer.reorder( settings.name ) --set this window to the top
-						buffer.redrawAll()
+						edited = true
 					end
-				else
+				elseif not high or high.getName() ~= settings.name and settings.active then
 					settings.active = false
 				end
 			end
@@ -754,9 +854,13 @@ function createProgram( options )
 				elseif e == "char" then
 					handleCharPress( self, e, p1 )
 				elseif e == "terminate" and settings.allowTerminate then
-					registryRemove( self, settings.name )
+					registryRemove( settings.name )
+					buffer.reorder()
+					term.clear()
+					buffer.redrawAll()
 				end
 			end
+			return edited
 		end
 
 		new.destroy = function( self )
@@ -769,6 +873,7 @@ function createProgram( options )
 			registryUpdate( self )
 		end
 
+		log("New stage created: "..settings.name)
 		return new
 
 	end
@@ -954,13 +1059,17 @@ function createProgram( options )
 		return registryFetch( name )
 	end
 
-	clone.startWindows = function( callback )
-		-- starts each windows event loop.
-		-- When a stage is destroyed, it will be stopped and must be "rebuilt" in order to function again.
+	local function begin()
 		local function exeOnEach( e, p1, p2, p3, p4 )
+			local re = false
 			for _, stage in ipairs( objects.stages ) do
-				stage:runEvent( e, p1, p2, p3, p4 )
+				if stage:runEvent( e, p1, p2, p3, p4 ) then re = true end
 			end
+			if #objects.stages <= 0 then
+				print("No stages built")
+				return "stop"
+			end
+			if re then buffer.redrawAll() end
 		end
 		local function loop()
 			while true do
@@ -968,14 +1077,69 @@ function createProgram( options )
 				if e == "program_stop"..program.name then
 					break
 				else
-					exeOnEach( e, p1, p2, p3, p4 )
+					if exeOnEach( e, p1, p2, p3, p4 ) == "stop" then break end
 				end
 			end
 		end
+		log("Starting Windows")
+		buffers.redrawAll()
 		if callback and type( callback ) == "function" then
 			parallel.waitForAll( loop, callback )
 		else
 			loop()
+		end
+	end
+
+	clone.setErrorCallback = function( cb )
+		program.customErrorCB = cb
+	end
+
+	clone.getErrorCallback = function()
+		return program.customErrorCB
+	end
+
+	clone.getCatchErrors = function()
+		return program.catchErrors
+	end
+
+	clone.setCatchErrors = function( v )
+		program.catchErrors = v
+	end
+
+	clone.startWindows = function( callback )
+		local function cPrint( text, y, color )
+			if color then term.setTextColor( color ) end
+			term.setCursorPos( math.ceil( termX/2-(#text/2) ), y )
+			term.clearLine()
+			write( text )
+		end
+		-- starts each windows event loop.
+		-- When a stage is destroyed, it will be stopped and must be "rebuilt" in order to function again.
+		if program.catchErrors then
+			local ok, err = pcall(begin)
+			if err or not ok then
+				if program.customErrorCB and type( program.customErrorCB ) == "function" then
+					program.customErrorCB( ok, err )
+				else
+					term.setBackgroundColor( colors.gray )
+					term.clear()
+					cPrint("DynaCode V3 - Exception Caught", 4, colors.orange)
+					cPrint("A fatal exception occurred which", 6, colors.lightGray)
+					cPrint("cannot be ignored.", 7, colors.lightGray)
+					cPrint(tostring( err ), 9, colors.orange)
+					cPrint("Please report this error on the forum", 12, colors.lightGray)
+					cPrint("accompanied by: Log, Steps to reproduce,", 13)
+					cPrint("your source code.", 14)
+					cPrint("For more info, visit the forum page", 16)
+					cPrint("Press any key to reboot", termY, colors.white)
+					while true do 
+						local e = os.pullEventRaw()
+						if e == "key" then os.reboot() end
+					end
+				end
+			end
+		else
+			begin()
 		end
 	end
 

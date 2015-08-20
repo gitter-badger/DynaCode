@@ -13,7 +13,7 @@
 ]]
 
 function clone( ID, callback, options )
-	error("DYNACODE Is officially deprecated. Try version 2 here: https://github.com/hbomb79/DynaCode/blob/master/DynaCode2 ")
+	error("\n\n\n\nYou are running DynaCode 1 which is officially deprecated. Try version 3 here: \n\nhttps://github.com/hbomb79/DynaCode/blob/master/DynaCode3")
 	local defaults = { --If an element cannot find a variable in itself(self), the passed settings(self.options) or the instance settings(options) then it will fallback to these (defaults)
 		allowTerminate = false,
 		addToBufferOnCreation = false,
