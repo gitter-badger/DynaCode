@@ -20,6 +20,7 @@
 
 ]]
 
+
 local oTerm = term.current()
 
 local function restore()
@@ -31,13 +32,14 @@ local oError = _G.error
 local function error( msg, level )
 	-- restore the term
 	restore()
+	if not level then level = 2 else level = level + 1 end
 	oError( msg, level )
 end
 
 local apiCfg = {
 	keepUpToDate = true, -- Check for updates the first time a program is created using this version of the API. (.createProgram())
 	updatePath = "DynaCodeTEST", -- Where is the API installed
-	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode3", -- Path to download. This is set to my repository on GitHub.
+	updateUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/DynaCode", -- Path to download. This is set to my repository on GitHub.
 	versionUrl = "https://raw.githubusercontent.com/hbomb79/DynaCode/master/version", -- Path to version file. This is set to my repository on GitHub.
 	versionPath = "DynaCodeVersion", -- Leave as is if you like, or change to a file (ideally in the same directory as DynaCode)
 	output = true, -- print information to the screen during update check
@@ -109,15 +111,22 @@ function getUpdateDelaySetting()
 	return apiCfg.clearDelay
 end
 
-function getVersionData()
+function getVersionData( silent )
 	if not http then
-		error("getVersionData: Cannot check for updates. ComputerCraft HTTP API is disabled.")
+		if silent then error("getVersionData: Cannot check for updates. ComputerCraft HTTP API is disabled.") else return false, "HTTP Disabled" end
 	end
 	for i = 1, 3 do
 		uPrint( false, "Fetching version information. Attempt "..i.." of 3")
 		local response = http.get( apiCfg.versionUrl )
 		if response then
-			local rData = assert( textutils.unserialize( response.readAll() ), "getVersionData: Remote Version Data Invalid")
+			local rData = textutils.unserialize( response.readAll() )
+			if not rData then
+				if not silent then
+					error("getVersionData: Remote Version Data Invalid")
+				else
+					return false, "getVersionData: Remote Version Data Invalid"
+				end
+			end
 			local update = false
 			local localData
 			local h = fs.open( apiCfg.versionPath, "r" )
@@ -135,21 +144,25 @@ function getVersionData()
 			end
 			if update then uPrint(colors.orange, "DynaCode 3 is out-of-date") else uPrint( colors.lime, "DynaCode 3 is up-to-date") end
 			if apiCfg.resetScreenPost then sleep(apiCfg.clearDelay) clear() end
-			return update, rData, localData --Returns true if update required and also returns the remote and local version data for manual checks.
+			if update then
+				return update, rData, localData or true
+			else
+				return update, rData, localData --Returns true if update required and also returns the remote and local version data for manual checks.
+			end
 		end
 	end
 	uPrint(colors.red, "Could not fetch version file.")
 	if apiCfg.resetScreenPost then sleep(apiCfg.clearDelay) clear() end
-	return false, nil
+	return false, "Could not fetch version file"
 end
 
-function installVersionData( rData )
+function installVersionData( rData, silent )
 	if not http then
-		error("installVersionData: Cannot fetch updates. ComputerCraft HTTP API is disabled.")
+		if not silent then error("installVersionData: Cannot fetch updates. ComputerCraft HTTP API is disabled.") else return false, "HTTP Disabled" end
 	end
 	-- @rData is the remoteDataFile.
 	-- Open local file and compare
-	if not rData or type( rData ) ~= "table" then error("installVersionData: Expected table, got ".. type( rData )) end
+	if not rData or type( rData ) ~= "table" then if not silent then error("installVersionData: Expected table, got ".. type( rData )) else return false, "Invalid Version Data" end end
 	local h = fs.open( apiCfg.versionPath, "r" )
 	local update = false
 	local lData
@@ -176,8 +189,10 @@ function installVersionData( rData )
 				h.write( textutils.serialize( rData ) )
 				h.close()
 				uPrint(colors.lime, "Install complete, rebooting in one second")
-				sleep(1)
-				os.reboot()
+				if not silent then
+					sleep(1)
+					os.reboot()
+				else return true end
 			end
 		end
 		uPrint(colors.red, "Could not fetch update data")
@@ -205,6 +220,52 @@ local function checkAndProceed()
 	if go and data then
 		installVersionData( data )
 	end
+end
+
+local function attemptInstall()
+	local old = apiCfg.output
+	apiCfg.output = false
+	print("Missing Files! Attempting to fetch")
+
+	local function printError( err )
+		print("DynaCode is missing files, while trying to fetch them we encountered a problem: "..tostring( err ))
+		sleep(5)
+		return false
+	end
+
+	local go, data, confirm = getVersionData( true )
+	if go and data and confirm then
+		local success, err = installVersionData( data, true )
+		if success then
+			print("Finished fetching required files")
+			sleep(1)
+			os.reboot()
+		else
+			printError( err )
+		end
+	elseif not go and not confirm then
+		printError( data )
+	else
+		print("No files are required")
+	end
+end
+
+local h = fs.open( apiCfg.versionPath, "r" )
+if h then
+	local r = h.readAll()
+	h.close()
+	if not r then
+		attemptInstall()
+	elseif r then
+		r = textutils.unserialize( r )
+		if not r then
+			attemptInstall()
+		elseif r then
+			_G._DYNACODE = r
+		end
+	end
+else
+	attemptInstall()
 end
 
 local function copy( tbl )
@@ -421,10 +482,6 @@ function createProgram( options )
 		log( content, mode )
 	end
 
-	function clone.test()
-		write("HIT!")
-	end
-
 	function clone.initializeLogFile()
 		if not program.logging or not program.loggingPath then
 			error("Set logging and logging path before initializing", 2)
@@ -486,9 +543,12 @@ function createProgram( options )
 			log("Reordered Buffer, On top: "..(function() if type ( topLevel ) == "string" then return topLevel else return "undefined" end end)())
 		end,
 		redrawAll = function( ignoreRules )
+			local oldX, oldY = term.getCursorPos()
+			term.setCursorBlink( false )
 			for _, stage in ipairs( objects.buffer ) do
 				stage.draw()
 			end
+			term.setCursorPos( oldX, oldY )
 
 		end,
 		getHighestLevel = function( nX, nY )
@@ -546,10 +606,8 @@ function createProgram( options )
 			active = false,
 			x = 2,
 			y = 2,
-			cX = 1, -- cursorX and cursorY are relative to the stage, not the computercraft terminal!
-			cY = 1,
-			width = 20,
-			height = 10,
+			width = 12,
+			height = 5,
 			backgroundColor = "white",
 			lastClickX = 2,
 			lastClickY = 2,
@@ -561,15 +619,22 @@ function createProgram( options )
 			filter = "NORMAL",
 			moveable = true,
 			fullscreen = false,
-			termSandbox = true,
-			sandbox = true,
-			osSandbox = true,
-			eventFilter = {}
-		} -- manual settings override these
+			eventWhitelist = {},
+			eventBlacklist = {}
+		} -- manual settings will override these
 		local window, windowBuffer, new, settings = {}, {}, {}, {}
 		setmetatable( stageDefaults, {__index = defaults})
 		setmetatable( cfg, {__index = stageDefaults} )
 		setmetatable( settings, {__index=cfg} )
+
+		local bufferDefaults = {
+			cursorBlink = false, 
+			backgroundColor = settings.backgroundColor, 
+			textColor = settings.textColor, 
+			cX = 1, 
+			cY = 1
+		}
+		setmetatable( windowBuffer, {__index=bufferDefaults})
 
 
 		local function registryUpdate( self )
@@ -603,18 +668,40 @@ function createProgram( options )
 		end
 
 		local function draw()
+			local oX, oY = term.getCursorPos()
 			if settings.borderless then
-				clone.canvas.drawArea( settings.x, settings.y, settings.width, settings.height, getColor( settings.backgroundColor ) )
+				clone.canvas.drawArea( settings.x, settings.y, settings.width-1, settings.height-1, getColor( settings.backgroundColor ) )
 			else
-				clone.canvas.drawHLine( settings.x, settings.y, settings.width, getColor( settings.topBarColor ) )
-				clone.canvas.drawArea( settings.x, settings.y+1, settings.width, settings.height, getColor( settings.backgroundColor ) )
+				clone.canvas.drawHLine( settings.x, settings.y, settings.width-1, getColor( settings.topBarColor ) )
+				clone.canvas.drawArea( settings.x, settings.y+1, settings.width-1, settings.height-1, getColor( settings.backgroundColor ) )
+			end
+			term.setBackgroundColor( getColor( settings.topBarColor ) )
+			if settings.title then
+				if settings.width - 4 >= 1 then
+					if #settings.title > settings.width - 4 then	
+						local stripped = settings.title:sub(1, settings.width-4)
+						term.setCursorPos( settings.x, settings.y )
+						write( stripped .. ".." )
+					else
+						term.setCursorPos( settings.x, settings.y )
+						write( settings.title )
+					end
+				else
+					term.setCursorPos( settings.x, settings.y )
+					if settings.closeButton then
+						write( ("."):rep( settings.width - 1 ) )
+					else
+						write( ("."):rep( settings.width ) )
+					end
+				end
 			end
 			if settings.closeButton then
 				term.setBackgroundColor( getColorFromFilter( settings.filter, settings.closeButtonColor ) )
 				term.setTextColor( getColorFromFilter( settings.filter, settings.closeButtonTextColor ) )
-				term.setCursorPos( settings.x + settings.width, settings.y )
+				term.setCursorPos( settings.x + settings.width-1, settings.y )
 				write("X")
 			end
+			term.setCursorPos( oX, oY )
 			term.setBackgroundColor( program.backgroundColor )
 		end
 
@@ -626,7 +713,7 @@ function createProgram( options )
 		end
 
 		local function handleMouseClick( self, event, button, nX, nY )
-			if nX == settings.x+settings.width and nY == settings.y and settings.closeButton then
+			if nX == settings.x+settings.width-1 and nY == settings.y and settings.closeButton then
 				close()
 			else
 				settings.lastClickX, settings.lastClickY = nX, nY
@@ -676,12 +763,69 @@ function createProgram( options )
 
 		-- Terminal Integration and coroutines
 		local runningProgram, pgPath, redirect = false, false, {}
+		setmetatable( new, {__index=redirect}) -- allows redirect methods to be used like <stage>.[termMethod](...)
 		function new.getRunningProgram()
 			return runningProgram -- either false or a coroutine.
 		end
 
 		function new.getTerm() return redirect end
 
+		local function internalBlit()
+
+		end
+
+		local function updateCursorBlink()
+			oTerm.setCursorBlink( windowBuffer.cursorBlink )
+		end
+
+		local function updateCursorPos()
+			local offset = ( function() if settings.borderless then return 1 else return 0 end end)()
+			oTerm.setCursorPos( settings.x + windowBuffer.cX - 1, settings.y + windowBuffer.cY - offset )
+		end
+
+		local function redirectDraw()
+			local offset = ( function() if settings.borderless then return 1 else return 0 end end)()
+			oTerm.setCursorBlink( false )
+			for line = 1, settings.height do
+				for char = 1, settings.width do
+					local letter = windowBuffer[line][char]
+					if letter.text ~= " " then
+						--error( letter.textColor )
+						oTerm.setBackgroundColor( letter.backgroundColor )
+						oTerm.setTextColor( letter.textColor )
+						oTerm.setCursorPos( settings.x + char - 1, settings.y + line - offset )
+						oTerm.write( letter.text )
+					end
+				end
+			end
+			oTerm.setBackgroundColor( program.backgroundColor )
+			oTerm.setCursorPos( windowBuffer.cX + settings.x - 1, windowBuffer.cY + settings.y - offset )
+			updateCursorBlink()
+		end
+
+		local function setupBuffer()
+			-- create buffer table
+			local lastX, lastY = 1, 1
+			for height = 1, settings.height+1 do
+				windowBuffer[height] = ( function( height ) if windowBuffer[height] then return windowBuffer[height] else return {} end end )( height )
+				lastY = height
+				for width = 1, settings.width+1 do
+					windowBuffer[height][width] = ( function( height, width ) if windowBuffer[height][width] then return windowBuffer[height][width] else return {text = ' ', textColor = getColor( windowBuffer.textColor), backgroundColor = getColor( windowBuffer.backgroundColor ) } end end )( height, width )
+					lastX = width
+				end
+				-- if any remain, remove them
+				for width = lastX, #windowBuffer[height] do
+					windowBuffer[height][width] = nil
+				end
+			end
+			-- remove old buffer items.
+			for height = lastY, #windowBuffer do
+				windowBuffer[height] = nil
+				-- if the height has been shrunk, then remove the excess tables
+			end
+			-- A window buffer has now been created with a table for each Y-Axis containing another table for each X-Axis.
+		end
+		setupBuffer()
 		--[[
 			When the main event manager catches an event, it first checks if the event can be passed to the window using the eventFilter (if window is not active then only events inside the
 			filter will be passed to the coroutine). If the event can be passed, the term will be redirected to the new stage term object and resumed.
@@ -694,36 +838,62 @@ function createProgram( options )
 		function redirect.isColor() return oTerm.isColor() end
 		redirect.isColour = redirect.isColor
 
-		function redirect.write( sString ) end
+		function redirect.write( sString )
+			oTerm.setCursorPos( windowBuffer.cX + settings.x - 1, windowBuffer.cY + settings.y - ( function() if settings.borderless then return 1 else return 0 end end)() ) -- cX and cY are cursor positions relative to the window, not the terminal. Make up for this my adding their position.
+			if windowBuffer.cX < 1 or windowBuffer.cX > settings.width or windowBuffer.cY < 1 or windowBuffer.cY > settings.height then
+				--return oTerm.write(sString)
+				return ""
+			end
+
+			for charIndex = 1, sString:len() do
+				windowBuffer[windowBuffer.cY][windowBuffer.cX].text = sString:sub(charIndex, charIndex)
+				windowBuffer[windowBuffer.cY][windowBuffer.cX].textColor = getColor( windowBuffer.textColor )
+				windowBuffer[windowBuffer.cY][windowBuffer.cX].backgroundColor = getColor( windowBuffer.backgroundColor )
+				windowBuffer.cX = windowBuffer.cX + 1
+
+				if windowBuffer.cX > settings.width then
+					--windowBuffer.cY = windowBuffer.cY + 1
+					break
+				end
+			end
+			oTerm.setBackgroundColor( getColor( windowBuffer.backgroundColor ) )
+			oTerm.setTextColor( getColor( windowBuffer.textColor ) )
+			local r = oTerm.write(sString)
+			oTerm.setBackgroundColor( program.backgroundColor )
+			oTerm.setTextColor( colors.white )
+			return r
+		end
 		function redirect.blit( sString, sBackground, sTextColor ) end
 
 		function redirect.clear() end
 		function redirect.clearLine() end
 
-		function redirect.getCursorPos() return settings.cx, settings.cy end
-		function redirect.setCursorPos( nX, nY ) settings.cx, settings.cy = tonumber( nX ), tonumber( nY ) end
+		function redirect.getCursorPos() return windowBuffer.cX, windowBuffer.cY end
+		function redirect.setCursorPos( nX, nY ) windowBuffer.cX, windowBuffer.cY = tonumber( nX ), tonumber( nY ) updateCursorPos() end
 
-		function redirect.setCursorBlink( bBlink ) settings.cursorBlink = bBlink end
-		function redirect.getCursorBlink() return settings.cursorBlink end
+		function redirect.setCursorBlink( bBlink ) windowBuffer.cursorBlink = bBlink updateCursorBlink() end
+		function redirect.getCursorBlink() return windowBuffer.cursorBlink end
 
-		function redirect.setTextColor( sColor ) settings.textColor = sColor end
+		function redirect.setTextColor( sColor ) windowBuffer.textColor = sColor end
 		redirect.setTextColour = redirect.setTextColor
 
-		function redirect.setBackgroundColor( sColor ) settings.backgroundColor = sColor end
+		function redirect.setBackgroundColor( sColor ) windowBuffer.backgroundColor = sColor end
 		redirect.setBackgroundColour = redirect.setBackgroundColor
 
-		function redirect.getBackgroundColor() return settings.backgroundColor end
+		function redirect.getBackgroundColor() return windowBuffer.backgroundColor end
 		redirect.getBackgroundColour = redirect.getBackgroundColor
 
-		function redirect.getTextColor() return settings.textColor end
+		function redirect.getTextColor() return windowBuffer.textColor end
 		redirect.getTextColour = redirect.getTextColor
 
-		function redirect.scroll( n ) end
+		function redirect.scroll( n )
+
+		end
 
 		function redirect.setVisible( bVisible ) settings.visible = bVisible end
 		function redirect.getVisible() return settings.visible end
 
-		function redirect.redraw() end
+		function redirect.redraw() redirectDraw() end
 
 		function redirect.restoreCursor() end
 
@@ -731,6 +901,62 @@ function createProgram( options )
 		function redirect.reposition() end
 
 		function redirect.getSize() return settings.width, settings.height end
+		
+
+		local function removeFromEventWhitelist( v )
+			for key, event in ipairs( settings.eventWhitelist ) do
+				if event == v then
+					table.remove( settings.eventWhitelist, key )
+				end
+			end
+		end
+		function new.removeFromEventWhitelist( v ) removeFromEventWhitelist( v ) end
+		
+		local function addToEventWhitelist( v )
+			removeFromEventWhitelist( v )
+			table.insert( settings.eventWhitelist, v )
+		end
+		function new.addToEventWhitelist( v ) addToEventWhitelist( v ) end
+
+		local function setEventWhitelist( v )
+			settings.eventWhitelist = v
+		end
+		function new.setEventWhitelist( v ) setEventWhitelist( v ) end
+
+		local function getEventWhitelist()
+			return settings.eventWhitelist
+		end
+		function new.getEventWhitelist() return getEventWhitelist() end
+
+		-- Above event filter methods for whitelist
+		
+		local function removeFromEventBlacklist( v )
+			for key, event in ipairs( settings.eventBlacklist ) do
+				if event == v then
+					table.remove( settings.eventBlacklist, key )
+				end
+			end
+		end
+		function new.removeFromEventBlacklist( v ) removeFromEventBlacklist( v ) end
+		
+		local function addToEventBlacklist( v )
+			removeFromEventBlacklist( v )
+			table.insert( settings.eventBlacklist, v )
+		end
+		function new.addToEventBlacklist( v ) addToEventBlacklist( v ) end
+
+		local function getEventBlacklist()
+			return settings.eventBlacklist
+		end
+		function new.getEventBlacklist() return getEventBlacklist() end
+
+
+		local function setEventBlacklist( v )
+			settings.eventBlacklist = v
+		end
+		function new.setEventBlacklist( v )
+			setEventBlacklist( v )
+		end
 
 		local function wrapProgram( path )
 			if runningProgram and coroutine.status( runningProgram ) == "suspended" then
@@ -753,7 +979,9 @@ function createProgram( options )
 					--setfenv( func, sandbox )
 				end
 				if func then
-					runningProgram = coroutine.create( func )
+					runningProgram = coroutine.create(function()
+						func()
+					end)
 					pgPath = path
 				else
 					error("wrapProgram: Could not load file")
@@ -764,18 +992,32 @@ function createProgram( options )
 		function new.runProgram( path )
 			wrapProgram( path )
 		end
-
-		function new.getEventFilter()
-			return settings.eventFilter
+		local messageCrashed, messageClosed = false, false
+		function new.threadCrash( err )
+			messageCrashed = coroutine.create(function()
+				term.setTextColor( colors.red )
+				print("Thread Crashed: "..err)
+				term.setTextColor( colors.white )
+				print("Press any key to continue")
+				while true do
+					local e = os.pullEvent("key")
+					restore()
+					if e == "key" then break end
+				end
+				close()
+			end)
 		end
 
-		function new.threadCrash( err )
-			-- display error message inside of window.
+		function new.getAlternate()
+			return messageCrashed, 1 or messageClosed, 2
+		end
+
+		function new.threadClosed()
 			restore()
-			print( settings.name .. " thread crash. Exception: " .. err )
-			print("Press any key to continue")
+			print("This program has Finished\nPress any key to continue")
 			os.pullEventRaw("key")
-			close()
+			print("KEY! Closing")
+			sleep(1)
 		end
 
 		function new.setCloseCallback( self, callback )
@@ -938,7 +1180,7 @@ function createProgram( options )
 			if e == "mouse_click" then
 				local high = buffer.getHighestLevel( p2, p3 )
 				if settings.borderless then offset = 0 else offset = 1 end
-				if p2 >= settings.x and p2 <= settings.x + settings.width and p3 >= settings.y and p3 <= settings.y + settings.height + offset and not settings.active then
+				if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height + offset - 1 and not settings.active then
 					-- if the window is the highest level.
 					if high and high:getName() == settings.name then
 						--settings.active = true
@@ -960,7 +1202,6 @@ function createProgram( options )
 					handleMouseDrag( self, e, p1, p2, p3 )
 				elseif e == "key" then
 					handleKeyPress( self, e, p1, p2 )
-					print( keys[p1] or p1 )
 				elseif e == "char" then
 					handleCharPress( self, e, p1 )
 				elseif e == "terminate" and settings.allowTerminate then
@@ -1176,37 +1417,62 @@ function createProgram( options )
 			"timer",
 			"redstone"
 		} -- events that are sent when the stage is not active.
+		local tFilter = {} --stores filters for coroutines.
 		local function filterEvent( event, stage )
-			for e in ipairs( activeEvent ) do
-				if e == event then return true end
+			-- if the stage has a coroutine filter, check if its in there
+			if tFilter[stage.getName()] == event or not tFilter[stage.getName()] or tFilter[stage.getName()] == "" then
+				tFilter[stage.getName()] = nil
+				-- check if the event is in the stages blacklist.
+				for key, e in ipairs( stage.getEventBlacklist() ) do
+					if e == event then return false end
+				end
+				-- if stage is active, return true.
+				if stage.getActive() then return true end
+				-- check if the event is in the stages whitelist (stage is not active).
+				for key, e in ipairs( stage.getEventWhitelist() ) do
+					if e == event then return true end
+				end
+			else
+				log(event .. " ~= " .. tostring(tFilter[stage.getName()]))
 			end
-			for e in ipairs( stage.getEventFilter() or {} ) do
-				if e == event then return true end
-			end
-			return false
 		end
 		local function exeOnEach( e, p1, p2, p3, p4 )
 			local re = false
 			for _, stage in ipairs( objects.stages ) do
-				local pg = stage.getRunningProgram()
-				if pg and coroutine.status( pg ) == "suspended" then
-					if ( not stage.getActive() and filterEvent( e, stage ) ) or stage.getActive() then
-						term.redirect( stage.getTerm() )
-						local ok, err = coroutine.resume( pg, e, p1, p2, p3, p4 )
-						if not ok and err then
-							-- Coroutine Crash, this skip is ignorable because the windowing system (the main event loop) is in another thread.
-							stage.threadCrash( err )
-						end
+				if stage:runEvent( e, p1, p2, p3, p4 ) then re = true end
+				stage.draw()
+				term.redirect( stage.getTerm() )
+				-- check if a message coroutine is active
+				local messageCo, pgCo = stage.getAlternate(), stage.getRunningProgram()
+				if messageCo and type( messageCo ) == "thread" and coroutine.status( messageCo ) == "suspended" then
+					-- send event to the message (threadClosed or crashed).
+					local ok, param = coroutine.resume( messageCo, e, p1, p2, p3, p4 )
+					log( tostring(ok)..", "..tostring( param ))
+				elseif pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( e, stage ) then
+					-- send event to runningProgram, check its status afterwards to determine if the program finished or crashed.\
+					local ok, param = coroutine.resume( pgCo, e, p1, p2, p3, p4 )
+					if ok and coroutine.status( pgCo ) == "dead" then
+						-- finished, reset the filter
+						tFilter[stage.getName()] = nil
+						stage.threadClosed()
+					elseif not ok then
+						-- crashed, reset the filter for this coroutine
+						tFilter[stage.getName()] = nil
+						stage.threadCrash( param )
+					elseif ok and param then
+						-- store the filter
+						tFilter[stage.getName()] = param
 					end
 				end
-				if stage:runEvent( e, p1, p2, p3, p4 ) then re = true end
+				if stage.getActive() then stage.redraw() end
+				term.redirect( oTerm )
 			end
-			term.redirect( oTerm ) -- return to the original terminal
+			
 			if #objects.stages <= 0 then
 				log("Cannot continue windows loop, all stages closed.", "w")
 				return "stop"
 			end
-			if re then buffer.redrawAll() end
+			if re then log("redrawing") buffer.redrawAll() end
 		end
 		local function loop()
 			while true do
@@ -1255,6 +1521,8 @@ function createProgram( options )
 		if program.catchErrors then
 			local ok, err = pcall(function() begin( callback ) restore() end)
 			if err or not ok then
+				log( tostring( err ), "e" )
+				restore()
 				if program.customErrorCB and type( program.customErrorCB ) == "function" then
 					program.customErrorCB( ok, err )
 				else
