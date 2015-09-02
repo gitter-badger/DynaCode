@@ -267,7 +267,7 @@ if h then
 else
 	attemptInstall()
 end
-
+--[[
 local function copy( tbl )
 	if type( tbl ) == "table" then
 		-- loop through table, copying keys
@@ -279,6 +279,13 @@ local function copy( tbl )
 	else
 		return tbl
 	end
+end]]
+
+local function copy(obj)
+  if type(obj) ~= 'table' then return obj end
+  local res = {}
+  for k, v in pairs(obj) do res[copy(k)] = copy(v) end
+  return res
 end
 
 local function validateRequirements( needed, provided, silent, prefix, suffix )
@@ -517,75 +524,8 @@ function createProgram( options )
 		end
 	end
 
-	local buffer = {
-
-		reorder = function( topLevel )
-			if true then return end
-			local temp = copy( objects.stages )
-
-			-- Set the topLevel stage to level 1
-			local i = 1
-			for key, stage in ipairs( temp ) do
-				if stage.getName() == topLevel then
-					stage:setBufferLevel( 1 )
-					i = 2
-					break
-				end
-			end
-			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
-			for key, stage in ipairs( temp ) do
-				if stage.getName() ~= topLevel then
-					stage:setBufferLevel( i )
-					i = i + 1
-				end
-			end
-			table.sort(temp, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
-			objects.buffer = temp
-			log("Reordered Buffer, On top: "..(function() if type ( topLevel ) == "string" then return topLevel else return "undefined" end end)())
-		end,
-		redrawAll = function( ignoreRules )
-			if true then return end
-			local oldX, oldY = term.getCursorPos()
-			term.setCursorBlink( false )
-			for _, stage in ipairs( objects.buffer ) do
-				stage.draw()
-			end
-			term.setCursorPos( oldX, oldY )
-
-		end,
-		getHighestLevel = function( nX, nY )
-			-- return the first occurrence of a stage at the clicked co-ords. Because the table is sorted correctly, ipairs will result in the
-			if true then return end
-			for i = #objects.buffer, 1, -1 do -- loop table in reverse because the last node is drawn last and is therefore on top of others.
-				local stage = registryFetch( objects.buffer[i].getName() )
-				if stage then
-					local stageX, stageY = stage.getPos()
-					if stage.getBorderless() then offset = 0 else offset = 1 end
-					if nX >= stageX and nX <= stageX + stage.getWidth() and nY >= stageY and nY <= stageY + stage.getHeight() + offset then
-						return stage
-					end
-				end
-			end
-		end,
-		drawBounds = function( sX, sY, eX, eY )
-			if true then return end
-			-- sX and sY, startX and startY.
-			-- eX and eY, endX and endY.
-			-- Draw these pixels on the windows.
-
-			-- First, clear the area by drawing a box.
-			clone.drawing.drawArea( sX, sY, sX-eX, sY-eY, colors.red )
-			local bounds = {}
-			-- Now, order the windows to redraw the bounds given.
-			for k, v in ipairs( objects.stages ) do
-				v:drawBounds( bounds )
-			end
-		end
-	}
-
-
-	local function addBufferRequestToQueue( sStage, tBuffer, xStart, yStart, xEnd, yEnd, xOffset, yOffset )
-		table.insert( programQueue, { stage = sStage, yStart = yStart, xStart = xStart, xEnd = xEnd, yEnd = yEnd, xOffset = xOffset, yOffset = yOffset } )
+	local function addBufferRequestToQueue( sStage, tBuffer, xStart, yStart, xEnd, yEnd )
+		table.insert( programQueue, { stage = sStage, yStart = yStart, xStart = xStart, xEnd = xEnd, yEnd = yEnd } )
 	end
 
 	local function removeBufferRequestFromQueue( sStage )
@@ -616,51 +556,92 @@ function createProgram( options )
 			-- create the Y template so the below function can index the merged table
 		end
 		requests = copy( programQueue )
-		table.sort(requests, function( a, b ) return registryFetch(a.stage).getBufferLevel() > registryFetch(b.stage).getBufferLevel() end)
+		table.sort(requests, function( aX, bX )
+			local a = registryFetch(aX.stage)
+			local b = registryFetch(bX.stage)
+			if not a then error(aX.stage.." must be built before running the queue") elseif not b then error(bX.stage.." must be built before running the queue") else
+				return a.getBufferLevel() > b.getBufferLevel()
+			end
+		end)
 
 		for key, r in ipairs( requests ) do
 			local stage, buffer = registryFetch( r.stage ), false
 			if stage then
 				buffer = stage.getMerge()
 			end
+			-- get x, y, height and width.
+			local sX, sY = stage.getPos()
 			if buffer and type( buffer ) == "table" then
 				for y = r.yStart, r.yEnd do
 					for x = r.xStart, r.xEnd do
-						merged[ y + r.yOffset - 1 ][ x + r.xOffset - 1 ] = buffer[y][x] -- get the stages new buffer each time.
-						merged[ y + r.yOffset - 1 ][ x + r.xOffset - 1 ].defined = true
-						merged[ y + r.yOffset - 1 ][ x + r.xOffset - 1 ].offset = { sY = r.yStart, sX = r.xStart }
+						merged[ y + sY - 1 ][ x + sX - 1 ] = buffer[y][x] -- get the stages new buffer each time.
+						merged[ y + sY - 1 ][ x + sX - 1 ].defined = true
 					end
 				end
 			end
 		end
-		-- If an item WAS defined but now no longer is, clear it back to default.
 		return merged
 	end
 
 	local function drawMerge( tMerged )
 		-- compare each entry in here to the old buffer. Only redraw if changed.
 		-- Draw the table passed (should be size of entire terminal)
+
+		local oBuffer = copy( objects.buffer )
 		local otc, obg = colors.white, colors.white
 		for y = 1, termY do
 			for x = 1, termX do
 				local redraw = false
-				if objects.buffer[y][x].defined and not tMerged[y][x].defined then
+				if oBuffer[y][x].defined and not tMerged[y][x].defined then
 					-- a pixel is no longer in use, clear it back to default.
 					redraw = true
 				end
-				if redraw or ( tMerged[y][x].char ~= objects.buffer[y][x].char or tMerged[y][x].textColor ~= objects.buffer[y][x].textColor or tMerged[y][x].backgroundColor ~= objects.buffer[y][x].backgroundColor or tMerged[y][x].defined ~= objects.buffer[y][x].defined) then
+				if tMerged[y][x].char ~= oBuffer[y][x].char or tMerged[y][x].textColor ~= oBuffer[y][x].textColor or tMerged[y][x].backgroundColor ~= oBuffer[y][x].backgroundColor then
 					term.setCursorPos( x, y )
 					if otc ~= tMerged[y][x].textColor then term.setTextColor( tMerged[y][x].textColor ) otc = tMerged[y][x].textColor end --only change if required.
 					if obg ~= tMerged[y][x].backgroundColor then term.setBackgroundColor( tMerged[y][x].backgroundColor ) obg = tMerged[y][x].backgroundColor end
 					term.write( tMerged[y][x].char )
+					oBuffer[y][x] = tMerged[y][x]
 				end
 			end
 		end
-		objects.buffer = tMerged
+		objects.buffer = oBuffer
 	end
 
-	function clone.bufferRedrawAll()
-		buffer.redrawAll()
+	local function drawAll()
+		drawMerge( processBufferQueue() )
+	end
+
+	local function reorderBufferLevels( sTop )
+
+		local stages = copy( objects.stages )
+		local start = 1
+		for key, stage in pairs( stages ) do
+			if stage.getName() == sTop then stage:setBufferLevel(1) start = 2 end
+		end
+		table.sort(stages, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+
+		for key, stage in ipairs( stages ) do
+			if stage.getName() ~= sTop then
+				stage:setBufferLevel(start)
+				start = start + 1
+			end
+		end
+		drawMerge( processBufferQueue() )
+
+	end
+
+	local function getHighestLevel( nX, nY )
+		local stages = copy( objects.stages )
+		table.sort(stages, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+
+		for i = #stages, 1, -1 do
+			local sX, sY = stages[i].getPos()
+			if stages[i].getBorderless() then offset = 0 else offset = 1 end
+			if nX >= sX and nX <= sX + stages[i].getWidth() and nY >= sY and nY <= sY + stages[i].getHeight() - offset then
+				return stages[i]
+			end
+		end
 	end
 
 	function clone.setDebug( v )
@@ -670,10 +651,6 @@ function createProgram( options )
 	function clone.setDebugSleep( v ) program.debugWait = v end
 
 	function clone.setDebugPauseOnException( v ) program.debugPauseOnException = v end
-
-	function clone.bufferReorder( v )
-		buffer.reorder( v )
-	end
 
 	function clone.createStage( cfg )
 		local stageDefaults = {
@@ -752,9 +729,9 @@ function createProgram( options )
 
 		function canvas.write( text )
 			if stageCanvas.cX < 1 or 
-				stageCanvas.cX > 1 + settings.width - 1 or 
+				stageCanvas.cX > 1 + settings.width or 
 				stageCanvas.cY < 1 or 
-				stageCanvas.cY > settings.height - 1 then
+				stageCanvas.cY > settings.height then
 				return ""
 			end
 			oTerm.setCursorPos( stageCanvas.cX + settings.x - 1, stageCanvas.cY + settings.y + 1 )
@@ -765,7 +742,7 @@ function createProgram( options )
 				stageCanvas[stageCanvas.cY][stageCanvas.cX].textColor = getColor( stageCanvas.textColor )
 				stageCanvas[stageCanvas.cY][stageCanvas.cX].backgroundColor = getColor( stageCanvas.backgroundColor )
 				stageCanvas.cX = stageCanvas.cX + 1
-				if stageCanvas.cX > settings.width - 1 then
+				if stageCanvas.cX > settings.width then
 					break
 				end
 	        end
@@ -788,7 +765,7 @@ function createProgram( options )
 		local function draw()
 			term.redirect( canvas )
 			local oX, oY = term.getCursorPos()
-			local emptyString = (" "):rep(settings.width-1)
+			local emptyString = (" "):rep(settings.width)
 
 			local startY, endY = 1, settings.height
 
@@ -843,51 +820,13 @@ function createProgram( options )
 		local function close()
 			registryRemove( settings.name )
 			removeBufferRequestFromQueue( settings.name )
-			drawMerge( processBufferQueue() )
+			drawAll()
 		end
-
-		--[[local function handleMouseClick( self, event, button, nX, nY )
-			if nX == settings.x+settings.width-1 and nY == settings.y and settings.closeButton then
-				close()
-			else
-				settings.lastClickX, settings.lastClickY = nX, nY
-			end
-		end
-		local function handleMouseScroll( self, event, direction, nX, nY )
-
-		end
-		local function handleMouseDrag( self, event, button, nX, nY )
-			local termX, termY = term.getSize()
-			-- if the last click was on the top bar, then allow drag.
-			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y and settings.moveable and settings.active then
-				local oldX, oldY = settings.lastClickX, settings.lastClickY
-				if nX < settings.lastClickX and settings.x - 1 > 0 then
-					settings.x = settings.x - 1
-				elseif nX > settings.lastClickX and settings.x + settings.width < termX then
-					settings.x = settings.x + 1
-				elseif nY < settings.lastClickY and settings.y - 1 > 0 then
-					settings.y = settings.y - 1
-				elseif nY > settings.lastClickY and nY + settings.height < termY then
-					settings.y = settings.y + 1
-				end
-				if settings.y ~= oldY or settings.x ~= oldX then
-					term.clear()
-					buffer.redrawAll()
-				end
-				settings.lastClickX, settings.lastClickY = nX, nY
-			end
-		end
-		local function handleKeyPress( self, event, key, held )
-
-		end
-		local function handleCharPress( self, event, key )
-
-		end]]
 
 		local function focus()
 			-- set all other stages to active = false.
 			settings.active = true
-			buffer.reorder( settings.name )
+			reorderBufferLevels( settings.name )
 		end
 
 		local function blur()
@@ -957,18 +896,16 @@ function createProgram( options )
 		local function mergeBuffers()
 			-- merge the nodes buffer and redirect buffer
 			-- TO-DO: Node buffer
+			draw() -- redraw the stages internal buffer for use by the programs main buffer
 			return stageCanvas
 		end
-
-		--log("Buffer: "..textutils.serialize( stageCanvas ))
 
 		local function queueRedraw()
 			-- order the programQueue to redraw this stage.
 			-- if the top bar is active.
-			addBufferRequestToQueue( settings.name, mergeBuffers(), 1, 1, settings.width, settings.height, settings.x, settings.y )
-			drawMerge( processBufferQueue() )
+			removeBufferRequestFromQueue( settings.name )
+			addBufferRequestToQueue( settings.name, mergeBuffers(), 1, 1, settings.width, settings.height )
 		end
-		function new.process() draw() queueRedraw() end
 		--[[
 			When the main event manager catches an event, it first checks if the event can be passed to the window using the eventFilter (if window is not active then only events inside the
 			filter will be passed to the coroutine). If the event can be passed, the term will be redirected to the new stage term object and resumed.
@@ -1130,10 +1067,6 @@ function createProgram( options )
 					error("wrapProgram: Could not load file")
 				end
 			end
-		end
-
-		function new.getRedrawStatus()
-			return cache.needsRedraw
 		end
 
 		function new.getMerge()
@@ -1354,7 +1287,7 @@ function createProgram( options )
 					settings.y = settings.y + 1
 				end
 				if settings.y ~= oldY or settings.x ~= oldX then
-					queueRedraw()
+					drawAll()
 				end
 				settings.lastClickX, settings.lastClickY = nX, nY
 			end
@@ -1382,18 +1315,16 @@ function createProgram( options )
 					handleCharPress( self, e, p1 )
 				elseif e == "terminate" and settings.allowTerminate then
 					registryRemove( settings.name )
-					buffer.reorder()
-					term.clear()
-					buffer.redrawAll()
+					removeBufferRequestFromQueue( settings.name )
+					drawAll()
 				end
 			end
 			-- if its not active, and the event was a mouse click, check if in bounds. If it isn't clicked on deactivate it, if it is activate it.
-			if e == "mouse_click" then
-				local high = buffer.getHighestLevel( p2, p3 )
-				if settings.borderless then offset = 0 else offset = 1 end
-				if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height + offset - 1 and not settings.active then
+			if e == "mouse_click" and registryFetch(settings.name) then
+				local high = getHighestLevel( p2, p3 )
+				if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height - 1 and not settings.active then
 					-- if the window is the highest level.
-					if high and high:getName() == settings.name then
+					if high and high.getName() == settings.name then
 						focus()
 					end
 				elseif not high or high.getName() ~= settings.name and settings.active then
@@ -1405,12 +1336,15 @@ function createProgram( options )
 		function new.destroy( self )
 			-- if stage is in registry remove it, also stop loop
 			registryRemove( settings.name )
+			removeBufferRequestFromQueue( settings.name )
 		end
 
 		function new.build( self )
 			-- add stage to registry
 			registryUpdate( self )
+			queueRedraw()
 		end
+		if settings.visible then queueRedraw() end
 		log("New stage created: "..settings.name)
 		return new
 
@@ -1666,7 +1600,7 @@ function createProgram( options )
 				log("Cannot continue windows loop, all stages closed.", "w")
 				return "stop"
 			end
-			if re then log("redrawing") buffer.redrawAll() end
+			drawAll()
 		end
 		local function loop()
 			while true do
@@ -1676,11 +1610,12 @@ function createProgram( options )
 				else
 					if exeOnEach( e, p1, p2, p3, p4 ) == "stop" then break end
 				end
+				drawAll()
 			end
 		end
 		log("Starting Windows", "w")
 		-- Draw every stage
-		buffer.redrawAll( true )
+		drawAll()
 		if callback and type( callback ) == "function" then
 			parallel.waitForAll( loop, callback )
 		else
