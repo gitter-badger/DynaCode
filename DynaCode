@@ -2053,8 +2053,8 @@ function createProgram( options )
 					if exeOnEach( event ) == "stop" then break end
 				end
 
-				if tEvents[e] then
-					for key, ev in ipairs( tEvents[e] ) do
+				if tEvents[event[1]] then
+					for key, ev in ipairs( tEvents[event[1]] ) do
 						if type( ev ) == "table" then ev.cb(unpack( event )) else ev(unpack( event )) end
 					end
 				end
