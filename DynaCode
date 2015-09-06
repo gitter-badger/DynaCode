@@ -642,6 +642,18 @@ function createProgram( options )
 		--term.setCursorBlink( false )
 		local oX, oY = term.getCursorPos()
 		local oBuffer = objects.buffer
+		local oTC, oBG = colors.white, colors.black
+
+		local function getTC()
+			if term.getTextColor then return term.getTextColor() else return oTC end
+		end
+
+		local function getBG()
+			if term.getBackgroundColor then return term.getBackgroundColor() else return oBG end
+		end
+		term.setTextColor( oTC )
+		term.setBackgroundColor( oBG )
+
 		for y = 1, termY do
 			for x = 1, termX do
 				local redraw = false
@@ -651,8 +663,8 @@ function createProgram( options )
 				end
 				if redraw or tMerged[y][x].char ~= oBuffer[y][x].char or tMerged[y][x].textColor ~= oBuffer[y][x].textColor or tMerged[y][x].backgroundColor ~= oBuffer[y][x].backgroundColor then
 					term.setCursorPos( x, y )
-					if tMerged[y][x].textColor ~= term.getTextColor() then term.setTextColor( tMerged[y][x].textColor ) end --only change if required.
-					if tMerged[y][x].backgroundColor ~= term.getBackgroundColor() then term.setBackgroundColor( tMerged[y][x].backgroundColor ) end
+					if tMerged[y][x].textColor ~= getTC() then term.setTextColor( tMerged[y][x].textColor ) oTC = tMerged[y][x].textColor end --only change if required.
+					if tMerged[y][x].backgroundColor ~= getBG() then term.setBackgroundColor( tMerged[y][x].backgroundColor ) oBG = tMerged[y][x].backgroundColor end
 					term.write( tMerged[y][x].char )
 					oBuffer[y][x] = tMerged[y][x]
 				end
