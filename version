@@ -1,4 +1,12 @@
 {
-build = 30,
-version = 3
+build = 33,
+version = 3,
+changes = {
+		"+ Scene objects",
+		"+ Button objects",
+		"+ Label objects",
+		"+ Added maxWidth, maxHeight, minWidth, minHeight settings for stage",
+		"* Fixed drag boundaries",
+		"* Fixed scene node drawing"
+	}
 }
