@@ -1,5 +1,5 @@
---[[
 
+--[[
 	DynaCode
 	Inspired by JavaFX.
 
@@ -221,7 +221,7 @@ local function attemptInstall()
 	end
 
 	local go, data, confirm = getVersionData( true )
-	if go and data and confirm then
+	if go and data then
 		local success, err = installVersionData( data, true )
 		if success then
 			print("Finished fetching required files")
@@ -306,20 +306,33 @@ local function validateRequirements( needed, provided, silent, prefix, suffix )
 end
 
 local function convertOptions( presets, provided )
+
 	local opts = {}
+
+	local function convertToType( p, option, value )
+		--error( "converting to: "..p .." from "..type( value ) .. " for option " .. option)
+		if p == "string" then opts[option] = tostring( value )
+		elseif p == "number" then 
+			local temp = tonumber( value )
+			if temp then opts[option] = temp else error("Invalid option "..option..". Type number expected, could not convert string to number!") end
+		elseif p == "boolean" then
+			if string.lower(value) == "false" then opts[option] = false elseif string.lower( value ) == "true" then opts[option] = true else error("Invalid option "..option.."Type boolean expected, string true or false must be explicitly set!") end
+		elseif p == "table" then
+			local temp = textutils.unserialize( value )
+			if temp then opts[option] = temp else error("Invalid option "..option..". Type table expected, could not unserialize string to table.") end
+		else opts[option] = value end
+	end
+
 	for option, value in pairs( provided ) do
 		if presets[option] then
 			local p = presets[option]
-			if p ~= type( value ) then
-				if p == "string" then opts[option] = tostring( value )
-				elseif p == "number" then 
-					local temp = tonumber( value )
-					if temp then opts[option] = temp else error("Invalid option "..option..". Type number expected, could not convert string to number!") end
-				elseif p == "boolean" then
-					if string.lower(value) == "false" then opts[option] = false elseif string.lower( value ) == "true" then opts[option] = true else error("Invalid option "..option.."Type boolean expected, string true or false must be explicitly set!") end
-				elseif p == "table" then
-					local temp = textutils.unserialize( value )
-					if temp then opts[option] = temp else error("Invalid option "..option..". Type table expected, could not unserialize string to table.") end
+			if type( p ) == "string" then
+				if p ~= type( value ) then
+					convertToType( p, option, value )
+				else opts[option] = value end
+			elseif type( p ) == "table" then
+				for _, t in pairs( p ) do
+					if t ~= type( value ) then convertToType( t, option, value ) else opts[option] = value end
 				end
 			else opts[option] = value end
 		else
@@ -397,7 +410,7 @@ function createProgram( options )
 		dialogs = {}, -- drawn last. Not zbased.
 		buffer = {}
 	}
-	local programQueue, tEvents = {}, {}
+	local programQueue, tEvents, reorderRequests = {}, {}, {}
 
 	local filters = {
 		{
@@ -574,6 +587,10 @@ function createProgram( options )
 		end
 	end
 
+	local function addReorderRequestToQueue( sStage )
+		table.insert( reorderRequests, sStage )
+	end
+
 	local function addBufferRequestToQueue( sStage, tBuffer, xStart, yStart, xEnd, yEnd )
 		log("Queueing redraw for "..sStage..", "..xStart..", "..yStart..", "..xEnd..", "..yEnd)
 		table.insert( programQueue, { stage = sStage, yStart = yStart, xStart = xStart, xEnd = xEnd, yEnd = yEnd } )
@@ -619,6 +636,8 @@ function createProgram( options )
 			if stage then
 				buffer = stage.getMerge()
 			end
+			local diag = stage.getDialog()
+			--if diag then stage:setRedrawStatus( true ) end
 			-- get x, y, height and width.
 			local sX, sY = stage.getPos()
 			local xStart, yStart = 1, 1
@@ -631,6 +650,12 @@ function createProgram( options )
 						merged[ y + sY - 1 ][ x + sX - 1 ].defined = true
 					end
 				end
+			end
+			-- Does this stage contain an active dialog box? If so, draw it now!
+			if diag then
+				-- draw now.
+				merged = diag:drawToTable( merged, termX, termY, 0, 0 ) -- table, max width, max height, offset X, offset Y
+				-- if the stage overlapped the dialog, it can cause programs. Make sure it redraws!
 			end
 		end
 		return merged
@@ -693,8 +718,6 @@ function createProgram( options )
 				start = start + 1
 			end
 		end
-		drawMerge( processBufferQueue() )
-
 	end
 
 	local function getHighestLevel( nX, nY )
@@ -717,6 +740,129 @@ function createProgram( options )
 	function clone.setDebugSleep( v ) program.debugWait = v end
 
 	function clone.setDebugPauseOnException( v ) program.debugPauseOnException = v end
+
+	function clone.createDialog( cfg )
+		--[[
+			The dialog is stored in the programs registry, when the stage it is bound to is updated, the dialog box is also updated.
+
+			On redraw @func processBufferQueue will identify any dialogs boxes owned by a particular stage and draw them appropriately.
+
+			If the dialog has no owner, it will simply not be displayed and no events will be passed to it.
+
+			The parent will be directly used to getColors from its filters and to update its draw status.
+		]]
+		local dialogDefaults = {
+			headerText = "Dialog Header",
+			headerTextColor = "blue",
+			headerBackgroundColor = "lightGray",
+			height = 5,
+			width = 30,
+			x = 10,
+			y = 1,
+			bodyTextColor = colors.white,
+			bodyBackgroundColor = "gray"
+		}
+
+		local function registryUpdate( self )
+			for k, v in ipairs( objects.dialogs ) do
+				if v and type(v) == "table" then
+					if v:getName() == settings.name then
+						table.remove( objects.dialogs, k )
+					end
+				end
+			end
+
+			table.insert( objects.dialogs, self )
+		end
+
+
+		local new = {}
+		local settings = {}
+		local cache = { needsRedraw = true }
+		setmetatable( cfg, {__index=dialogDefaults})
+		setmetatable( settings, {__index=cfg})
+		local parent = false
+
+		-- when moved a forced redraw will occur, after the event has passed through all coroutines drawAll() will redraw this dialog if it requires redrawing.
+
+		function new.drawToTable( self, tBuffer, nMaxX, nMaxY, nXOffset, nYOffset )
+			-- If the dialog box has header text, create a box at the top of the buffer for it, center the text (one line)
+			local util = parent
+			if not util then return tBuffer end
+			local headerString = {}
+			for i = 1, #settings.headerText do
+				headerString[i] = string.sub( settings.headerText, i, i )
+			end
+
+			for y = 1, settings.height do
+				if y + settings.y - 1 + nYOffset > nMaxY then break end
+				for x = 1, settings.width do
+					if x + settings.x + nXOffset - 1 <= nMaxX then
+						if y >= 1 and y <= 3 and settings.headerText then
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].char = " "
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].backgroundColor = util.getColor( settings.headerBackgroundColor )
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].textColor = util.getColor( settings.headerTextColor )
+							if y == 2 and x >= 1 and x <= settings.width - 1 then
+								if headerString[x-1] then tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].char = headerString[x-1] end
+							end
+						elseif y == 4 then
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].char = "-"
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].backgroundColor = util.getColor( settings.headerBackgroundColor )
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].textColor = util.getColor( settings.headerTextColor )
+						else
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].char = " "
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].backgroundColor = util.getColor( settings.bodyBackgroundColor )
+							tBuffer[y + nYOffset + settings.y - 1][x + nXOffset + settings.x - 1].textColor = util.getColor( settings.bodyTextColor )
+						end
+					end
+				end
+			end
+			return tBuffer
+		end
+
+		function new.bindTo( self, v ) if parent then error("Dialog is already bound to a parent: "..parent.getName()..". Unbind before binding this dialog box again") else parent = v v:setDialog( self ) end end
+		function new.unbind( self ) end
+		function new.getBind( self ) end
+
+		function new.setHeaderText( self, v ) 
+			settings.headerText = v
+		end
+		function new.setHeaderTextColor( self, v ) 
+			settings.headerTextColor = v
+		end
+		function new.setHeaderBackgroundColor( self, v ) 
+			settings.headerBackgroundColor = v
+		end
+
+		function new.getHeaderText( self ) return settings.headerText end
+		function new.getHeaderTextColor( self ) return settings.headerTextColor end
+		function new.getHeaderBackgroundColor( self ) return settings.headerBackgroundColor end
+
+		function new.setBodyText( self, v ) 
+			settings.bodyText = v
+		end
+		function new.setBodyTextColor( self, v ) 
+			settings.bodyTextColor = v
+		end
+		function new.setBodyBackgroundColor( self, v ) 
+			settings.bodyBackgroundColor = v
+		end
+
+		function new.getBodyText( self ) return settings.bodyText end
+		function new.getBodyTextColor( self ) return settings.bodyTextColor end
+		function new.getBodyBackgroundColor( self ) return settings.bodyBackgroundColor end
+
+		function new.destroy( self ) end
+
+		function new.setRedrawStatus( self, v )
+			cache.needsRedraw = v
+		end
+		function new.getRedrawStatus( self )
+			return cache.needsRedraw
+		end
+
+		return new
+	end
 
 	function clone.createStage( cfg )
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your stage.")
@@ -747,11 +893,23 @@ function createProgram( options )
 			maxWidth = 12,
 			maxHeight = 12
 		} -- manual settings will override these
+		local stageCallbacks = {
+			["event"] = false,
+			["resize"] = false,
+			["close"] = false,
+			["reposition"] = false,
+			["threadTerminate"] = false,
+			["focus"] = false,
+			["blur"] = false,
+			["threadCrash"] = false,
+			["threadFinish"] = false
+		}
 		local window, windowBuffer, new, settings, cache, cacheDefaults, stageCanvas = {}, {}, {}, {}, {}, { needsRedraw = true, redrawNodes = true }, {}
 		setmetatable( stageDefaults, {__index = defaults})
 		setmetatable( cfg, {__index = stageDefaults} )
 		setmetatable( settings, {__index=cfg} )
 		setmetatable( cache, {__index=cacheDefaults})
+		local dialog = false
 
 		local bufferDefaults = {
 			cursorBlink = false, 
@@ -839,6 +997,16 @@ function createProgram( options )
 				if c then return c end
 			end
 			return colors[cl] or cl or colors.white
+		end
+
+		local function runCallback(name, tPass, keepPacked)
+			if stageCallbacks[name] and type( stageCallbacks[name] ) == "function" then
+				if type( tPass ) == "table" and not keepPacked then
+					stageCallbacks[name](unpack( tPass )) 
+				else
+					stageCallbacks[name]( tPass )
+				end
+			end
 		end
 
 		local canvas = {}
@@ -948,6 +1116,7 @@ function createProgram( options )
 		local runningProgram, pgPath, redirect = false, false, {}
 
 		local function close()
+			runCallback("close")
 			registryRemove( settings.name )
 			removeBufferRequestFromQueue( settings.name )
 			drawAll()
@@ -959,20 +1128,209 @@ function createProgram( options )
 		end
 
 		local function focus()
+			runCallback("focus")
 			settings.active = true
 			cache.needsRedraw = true
 			cache.redrawNodes = true
-			reorderBufferLevels( settings.name )
+			--reorderBufferLevels( settings.name )
+			addReorderRequestToQueue( settings.name )
 			if windowBuffer.cursorBlink then term.setCursorBlink( true ) term.setCursorPos(1,1) end
 		end
 
 		local function blur()
+			runCallback("blur")
 			cache.needsRedraw = true
 			cache.redrawNodes = true
 			settings.active = false
 		end
 
 		setmetatable( new, {__index=redirect})
+
+		local function compileText( text, maxWidth, maxHeight )
+			-- Returns a buffer containing word wrapped text
+			local cX, cY = 1, 1
+			local compiled = {}
+			local function newLine()
+				cX, cY = 1, cY + 1
+				if cY > maxHeight then
+					compiled[cY-1][maxWidth-3] = "."
+					compiled[cY-1][maxWidth-2] = "."
+					compiled[cY-1][maxWidth-1] = "."
+					return true
+				end
+			end
+
+			for y = 1, maxHeight do
+				compiled[y] = {}
+				for x = 1, maxWidth do compiled[y][x] = {} end
+			end
+
+			-- separate the text into separate words and process.
+			while string.len( text ) > 0 do
+
+				local whitespace = string.match( text, "^[ \t]+" )
+				if whitespace then
+					cX = cX + #whitespace
+					text = string.sub( text, string.len(whitespace) + 1 )
+				end
+
+
+				local word = string.match( text, "^[^ \t\n]+" )
+				if word then
+					text = text:sub( word:len() + 1 )
+					if word:len() > maxWidth then
+						log("word: "..word.." is longer than "..maxWidth)
+						--while word:len() > 0 do
+						-- if reached end of line, create new line.
+						if cX > maxWidth then if newLine() then return compiled end end
+						-- we have enough room for this word, separate it into chars and add them to the buffer
+						for index = 1, word:len() do
+							compiled[cY][cX] = word:sub( index, index )
+							cX = cX + 1
+							if cX > maxWidth then if newLine() then return compiled end end
+						end
+						--end
+					else
+						-- if at end of line, create a new line.
+						if cX + #word - 1 > maxWidth then if newLine() then return compiled end end
+						for index = 1, word:len() do
+							compiled[cY][cX] = word:sub( index, index )
+							cX = cX + 1
+							if cX > maxWidth then if newLine() then return compiled end end
+						end
+					end
+				end
+			end
+			return compiled
+
+		end
+
+		--[[local function createDialog( nX, nY, width, height, tButtons, header, body )
+			if type( nX ) ~= "number"
+			or type( nY ) ~= "number"
+			or type( width ) ~= "number"
+			or type( height ) ~= "number"
+			or type( tButtons ) ~= "table" then
+				error("createDialog: Expected number, number, number, number, table", 2)
+			end
+			-- creates a dialog box relative to the stage (1,1 is top left of stage). Returns the clicked button (OK, Cancel, Retry, Close, Ignore)
+			-- A dialog box is an object full of properties (including a coroutine) that is bound to a window.
+			local new = {}
+			local nodes = {}
+			for key, button in ipairs( tButtons ) do
+				if type( button ) == "string" then table.insert( nodes, getPreset( button ) )
+				elseif type( button ) == "table" then
+					-- the user can specify the text, colors and position of the button in the dialog window.
+					table.insert( nodes, button )
+				else error("Invalid node passed, type of string or table expected got: "..type( button ), 2) end
+			end
+
+			local function draw()
+				-- draw, this will draw to the stageCanvas (end).
+				local txt = compileText(body, width, height)
+				term.setTextColor( colors.orange )
+				term.setBackgroundColor( colors.white )
+				local b = {}
+				for y = 1, height do
+					if not b[y] then b[y] = {} end
+					for x = 1, width do
+						if type( txt[y][x] ) == "string" then
+							b[y][x] = txt[y][x]
+						else b[y][x] = " " end
+					end
+				end
+				return b
+			end
+
+			function new.draw() return draw() end
+
+			new.co = coroutine.create(function()
+				while true do
+					local event = {coroutine.yield()}
+					if event[1] == "mouse_click" then
+						-- check if clicked on a node.
+					end
+				end
+			end)
+
+			return new
+
+		end]]
+
+
+
+		function new.getRedrawStatus( self ) return cache.needsRedraw end
+		function new.setRedrawStatus( self, v ) cache.needsRedraw = v end
+
+		--[[
+
+			Callback Setters and Getters
+
+		]]
+
+		function new.setEventCallback( self, v ) 
+			stageCallbacks.event = v
+		end
+		function new.getEventCallback( self ) 
+			return stageCallbacks.event
+		end
+
+		function new.setResizeCallback( self, v ) 
+			stageCallbacks.resize = v
+		end
+		function new.getResizeCallback( self ) 
+			return stageCallbacks.resize
+		end
+
+		function new.setCloseCallback( self, v ) 
+			stageCallbacks.close = v
+		end
+		function new.getCloseCallback( self ) 
+			return stageCallbacks.close
+		end
+
+		function new.setRepositionCallback( self, v ) 
+			stageCallbacks.reposition = v
+		end
+		function new.getRepositionCallback( self ) 
+			return stageCallbacks.reposition
+		end
+
+		function new.setThreadTerminateCallback( self, v ) 
+			stageCallbacks.threadTerminate = v
+		end
+		function new.getThreadTerminateCallback( self ) 
+			return stageCallbacks.threadTerminate
+		end
+
+		function new.setFocusCallback( self, v ) 
+			stageCallbacks.focus = v
+		end
+		function new.getFocusCallback( self ) 
+			return stageCallbacks.focus
+		end
+
+		function new.setBlurCallback( self, v ) 
+			stageCallbacks.blur = v
+		end
+		function new.getBlurCallback( self ) 
+			return stageCallbacks.blur
+		end
+
+		function new.setThreadCrashCallback( self, v ) 
+			stageCallbacks.threadCrash = v
+		end
+		function new.getThreadCrashCallback( self ) 
+			return stageCallbacks.threadCrash
+		end
+
+		function new.setThreadFinishCallback( self, v ) 
+			stageCallbacks.threadFinish = v
+		end
+		function new.getThreadFinishCallback( self ) 
+			return stageCallbacks.threadFinish
+		end
+
 		function new.getRunningProgram() return runningProgram end
 		function new.getTerm() return redirect end
 
@@ -1036,10 +1394,9 @@ function createProgram( options )
 				if cache.redrawNodes and not over then cache.redrawNodes = false end
 				if settings.scene and settings.scene.getRedrawStatus() and not over then settings.scene:setRedrawStatus( false ) end
 				oMerge = b
-				oNodes = nodeB
-				return b
+				return copy( oMerge )
 			else
-				return oMerge
+				return copy( oMerge )
 			end
 		end
 
@@ -1216,6 +1573,7 @@ function createProgram( options )
 		local messageCrashed, messageClosed = false, false
 		function new.threadCrash( err )
 			if not messageCrashed then
+				runCallback("threadCrash")
 				messageCrashed = coroutine.create(function()
 					term.setTextColor( colors.red )
 					print("Thread Crashed: "..err)
@@ -1230,6 +1588,7 @@ function createProgram( options )
 
 		local function terminate()
 			if not messageCrashed then
+				runCallback("threadTerminate")
 				messageCrashed = coroutine.create(function()
 					term.setTextColor( colors.red )
 					print("Thread Terminated")
@@ -1250,6 +1609,7 @@ function createProgram( options )
 
 		function new.threadClosed()
 			if not messageClosed then
+				runCallback("threadFinish")
 				messageClosed = coroutine.create(function()
 					term.setTextColor( colors.white )
 					print("Program finished\nPress any key to continue")
@@ -1260,15 +1620,11 @@ function createProgram( options )
 			end
 		end
 
-		function new.setCloseCallback( self, callback )
-			if not self or not ( type( self ) == "table" and self.getType and self.getType() == "stage" ) or not callback then
-				error("Expected table SELF of type stage and callback function")
-			end
-			if self.getName() ~= settings.name then
-				error("Passed self does not match this stage")
-			end
-			settings.onCloseCB = callback
+		function new.setDialog( self, diag )
+			dialog = diag
 		end
+
+		function new.getDialog( self ) return dialog end
 
 		function new.draw( self )
 			if not registryFetch( settings.name ) then error("Stage must be built before drawing") end
@@ -1422,7 +1778,9 @@ function createProgram( options )
 			settings.lastClickX, settings.lastClickY = nX, nY
 			if settings.scene and type( settings.scene ) == "table" and settings.scene.getType and settings.scene.getType() == "scene" then
 				-- if the click was on a node in the stages SCENE, then run the onclick callback.
-				for id, node in pairs( settings.scene.getNodes() ) do
+				local nodes = settings.scene.getNodes()
+				for i = #nodes, 1, -1 do
+					local node = nodes[i]
 					-- get the nodes x, y, width and height properties.
 					local nodeX, nodeY = node.getPos()
 					nodeX = tonumber( nodeX )
@@ -1458,13 +1816,17 @@ function createProgram( options )
 			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y and settings.moveable and settings.active then
 				if nX < settings.lastClickX and (settings.allowOffScreen or settings.x - 1 > 0) then
 					settings.x = settings.x - 1
+					runCallback("reposition")
 				elseif nX > settings.lastClickX and ( settings.allowOffScreen or settings.x + settings.width - 1 < termX ) then
 					settings.x = settings.x + 1
+					runCallback("reposition")
 				end
 				if nY < settings.lastClickY and (settings.allowOffScreen or settings.y - 1 > 0) then
 					settings.y = settings.y - 1
+					runCallback("reposition")
 				elseif nY > settings.lastClickY and (settings.allowOffScreen or nY + settings.height - 1 - offset < termY) then
 					settings.y = settings.y + 1
+					runCallback("reposition")
 				end
 				settings.lastClickX, settings.lastClickY = nX, nY
 			elseif settings.lastClickX == settings.x + settings.width - 1 and settings.lastClickY == settings.y + settings.height - offset then
@@ -1481,6 +1843,7 @@ function createProgram( options )
 				end
 				settings.lastClickX, settings.lastClickY = nX, nY
 				if settings.width ~= oW or settings.height ~= oH then
+					runCallback("resize")
 					resetBuffer()
 					cache.needsRedraw = true
 					cache.redrawNodes = true
@@ -1497,6 +1860,7 @@ function createProgram( options )
 		end
 
 		function new.runEvent( self, e, p1, p2, p3, p4 )
+			runCallback("event", {e, p1, p2, p3, p4})
 			if e == "deactivate" then
 				if p1 == settings.name then focus() else blur() end
 			end
@@ -1521,8 +1885,8 @@ function createProgram( options )
 				if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height - offset and not settings.active then
 					if high and high.getName() == settings.name then
 						focus()
-					end
-				elseif not high or high.getName() ~= settings.name and settings.active then
+					else blur() end
+				elseif not high or high.getName() ~= settings.name then
 					blur()
 				end
 			end
@@ -1588,8 +1952,7 @@ function createProgram( options )
 				-- fully create the node, buttons and other objects do not require a name mainly because they are always stored inside the scene. Although without a name specified scene.getNode(string Name) will not work (throws Exception)
 				if xmlCallbacks[xml.label] then
 					local args = xml.xarg
-					if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end log( xml.label ) end
-					log( args.text )
+					if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end end
 					local node = xmlCallbacks[xml.label]( args )
 					node:setScene( new )
 					if node then return node else error("Failed to create "..xml.label.." node using designated method") end
@@ -1884,7 +2247,8 @@ function createProgram( options )
 			disabledBackgroundColor = "gray",
 			disabledTextColor = "black",
 			text = "label",
-			name = false
+			name = false,
+			visible = true
 		}
 		local settings = {}
 		setmetatable(settings, {__index=cfg})
@@ -1902,21 +2266,23 @@ function createProgram( options )
 		function new.queueRedraw() queueRedraw() end
 
 		function new.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage )
-			--settings.y = tonumber( settings.y )
-			--settings.height = tonumber( settings.height )
-			local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
-			tText = {}
-			for cIndex = 1, (settings.text):len() do
-				tText[cIndex] = (settings.text):sub(cIndex, cIndex)
-			end
-			for x = 1, getWidth() do
-				if x <= nWidth and settings.y <= nHeight then
-					tBuffer[settings.y][x+settings.x-1] = {
-						textColor = util.getColor( settings.textColor ),
-						backgroundColor = util.getColor( settings.backgroundColor ),
-						char = tText[x] or " ",
-						nDefined = true
-					}
+			if settings.visible then
+				--settings.y = tonumber( settings.y )
+				--settings.height = tonumber( settings.height )
+				local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
+				tText = {}
+				for cIndex = 1, (settings.text):len() do
+					tText[cIndex] = (settings.text):sub(cIndex, cIndex)
+				end
+				for x = 1, getWidth() do
+					if x <= nWidth and settings.y <= nHeight then
+						tBuffer[settings.y][x+settings.x-1] = {
+							textColor = util.getColor( settings.textColor ),
+							backgroundColor = util.getColor( settings.backgroundColor ),
+							char = tText[x] or " ",
+							nDefined = true
+						}
+					end
 				end
 			end
 		end
@@ -1969,6 +2335,44 @@ function createProgram( options )
 		return new
 	end
 
+	function clone.createInput( cfg )
+		-- focusable node. Only receives key/char events when focused
+		local inputDefaults = {
+			x = 1,
+			y = 1,
+			limit = 10,
+			replace = false,
+			textColor = "orange",
+			backgroundColor = "gray",
+			focused = false,
+			enabled = true,
+			visible = true
+		}
+		local new = {}
+
+		local function drawToTable() end
+		local function handleChar() end
+		local function handleKey() end
+
+		function new.drawToTable() end
+
+		function new.getPos() end
+		function new.setX() end
+		function new.setY() end
+
+		function new.getTyped() end
+		function new.setTyped() end
+
+		function new.getWidth() end
+
+		function new.setLimit() end
+		function new.getLimit() end
+
+		--function new.
+
+		return new
+	end
+
 	function clone.getStageFromRegistry( name )
 		return registryFetch( name )
 	end
@@ -2000,8 +2404,8 @@ function createProgram( options )
 		end
 		local cb = false
 		local function exeOnEach( eArgs )
-			
 			term.setCursorBlink( false )
+			local order = {}
 			for _, stage in ipairs( objects.stages ) do
 				stage:runEvent( unpack( eArgs ) )
 				term.redirect( stage.getTerm() )
@@ -2013,7 +2417,7 @@ function createProgram( options )
 						if coroutine.status( messageCo ) == "suspended" and ok and param then
 							-- set filter
 							tMessages[stage.getName()] = param
-						end
+						elseif coroutine.status( messageCo ) == "dead" and not ok then error( param, 2 ) end -- errors in callbacks (crashed threads) will still be called and displayed
 					end
 				elseif stage.getActive() and pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( eArgs[1], stage ) then
 					-- send event to runningProgram, check its status afterwards to determine if the program finished or crashed.
@@ -2042,7 +2446,6 @@ function createProgram( options )
 				log("Cannot continue windows loop, all stages closed.", "w")
 				return "stop"
 			end
-			--drawAll()
 		end
 		local function loop()
 			while true do
@@ -2059,7 +2462,12 @@ function createProgram( options )
 					end
 				end
 
-				if true or e == "mouse_click" or e == "mouse_drag" or e == "mouse_scroll" then drawAll() end
+				for key, request in ipairs( reorderRequests ) do
+					reorderBufferLevels( request )
+				end
+				reorderRequests = {}
+
+				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then drawAll() end
 				term.setCursorBlink( cb )
 			end
 		end
