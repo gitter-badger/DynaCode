@@ -1,12 +1,7 @@
 {
-build = 33,
+build = 35,
 version = 3,
 changes = {
-		"+ Scene objects",
-		"+ Button objects",
-		"+ Label objects",
-		"+ Added maxWidth, maxHeight, minWidth, minHeight settings for stage",
-		"* Fixed drag boundaries",
-		"* Fixed scene node drawing"
+		"* Fixed Dialog Window click detection (z-based)"
 	}
 }

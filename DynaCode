@@ -407,7 +407,7 @@ function createProgram( options )
 	local objects = { -- program registry
 		scenes = {}, -- not drawn, just here to be accessed.
 		stages = {}, -- drawn
-		dialogs = {}, -- drawn last. Not zbased.
+		dialogs = {},
 		buffer = {}
 	}
 	local programQueue, tEvents, reorderRequests = {}, {}, {}
@@ -721,14 +721,31 @@ function createProgram( options )
 	end
 
 	local function getHighestLevel( nX, nY )
+		local list = {}
 		local stages = copy( objects.stages )
-		table.sort(stages, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+		local dialogs = copy( objects.dialogs )
 
-		for i = #stages, 1, -1 do
-			local sX, sY = stages[i].getPos()
-			if stages[i].getBorderless() then offset = 1 else offset = 0 end
-			if nX >= sX and nX <= sX + stages[i].getWidth() - 1 and nY >= sY and nY <= sY + stages[i].getHeight() - offset then
-				return stages[i]
+		for _, t in pairs( { stages, dialogs } ) do
+			for key, item in ipairs( t ) do table.insert( list, item ) end
+		end
+
+		table.sort(list, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
+
+		--[[ Compile a list of windows and dialogs.]]
+
+		for i = #list, 1, -1 do
+			local sX, sY = list[i].getPos()
+			local offset = 0
+			if list[i].getType() == "stage" then
+				if list[i].getBorderless() then offset = 1 else offset = 0 end
+			else offset = 1 end
+			if nX >= sX and nX <= sX + list[i].getWidth() - 1 and nY >= sY and nY <= sY + list[i].getHeight() - offset then
+				if list[i].getType() == "stage" then 
+					log("highest level (stage): "..list[i].getName()) 
+				else 
+					log("highest level (dialog): "..list[i].getBind().getName()) 
+				end
+				return list[i]
 			end
 		end
 	end
@@ -766,7 +783,7 @@ function createProgram( options )
 		local function registryUpdate( self )
 			for k, v in ipairs( objects.dialogs ) do
 				if v and type(v) == "table" then
-					if v:getName() == settings.name then
+					if v == self then
 						table.remove( objects.dialogs, k )
 					end
 				end
@@ -822,7 +839,7 @@ function createProgram( options )
 
 		function new.bindTo( self, v ) if parent then error("Dialog is already bound to a parent: "..parent.getName()..". Unbind before binding this dialog box again") else parent = v v:setDialog( self ) end end
 		function new.unbind( self ) end
-		function new.getBind( self ) end
+		function new.getBind( self ) return parent end
 
 		function new.setHeaderText( self, v ) 
 			settings.headerText = v
@@ -860,6 +877,26 @@ function createProgram( options )
 		function new.getRedrawStatus( self )
 			return cache.needsRedraw
 		end
+
+		function new.setX() end
+		function new.setY() end
+
+		function new.getPos() return settings.x, settings.y end
+
+		function new.getWidth() return settings.width end
+		function new.getHeight() return settings.height end
+
+		function new.getBufferLevel()
+			if parent then return parent.getBufferLevel() else return false end
+		end
+
+		function new.getType() return "dialog" end
+
+		function new.flash()
+			
+		end
+
+		registryUpdate( new )
 
 		return new
 	end
@@ -1777,20 +1814,12 @@ function createProgram( options )
 			local onNode = false
 			settings.lastClickX, settings.lastClickY = nX, nY
 			if settings.scene and type( settings.scene ) == "table" and settings.scene.getType and settings.scene.getType() == "scene" then
-				-- if the click was on a node in the stages SCENE, then run the onclick callback.
 				local nodes = settings.scene.getNodes()
 				for i = #nodes, 1, -1 do
 					local node = nodes[i]
-					-- get the nodes x, y, width and height properties.
-					local nodeX, nodeY = node.getPos()
-					nodeX = tonumber( nodeX )
-					nodeY = tonumber( nodeY )
-					local nodeW, nodeH = node.getWidth(), node.getHeight()
-					-- the nodes x and y are relative to the scene (1,1 is top left of window, not terminal)
-					-- so before we check the click we must convert nX and nY to relative co-ords
+					local nodeX, nodeY, nodeW, nodeH = node.getPos(), node.getWidth(), node.getHeight()
 					local x, y = nX - settings.x + 1, nY - settings.y + 1 - offset
 					if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
-						-- clicked this node.
 						onNode = node
 						break
 					end
@@ -1860,11 +1889,12 @@ function createProgram( options )
 		end
 
 		function new.runEvent( self, e, p1, p2, p3, p4 )
+
 			runCallback("event", {e, p1, p2, p3, p4})
 			if e == "deactivate" then
 				if p1 == settings.name then focus() else blur() end
 			end
-			if settings.active then
+			if not dialog and settings.active then
 				if e == "mouse_click" then
 					handleMouseClick( self, e, p1, p2, p3 )
 				elseif e == "mouse_scroll" then
@@ -1878,18 +1908,32 @@ function createProgram( options )
 				elseif e == "terminate" and settings.allowTerminate then
 					terminate()
 				end
-			end
-			if e == "mouse_click" and registryFetch(settings.name) then
-				local high = getHighestLevel( p2, p3 )
-				local offset = (function() if not settings.borderless then return 0 else return 1 end end)()
-				if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height - offset and not settings.active then
-					if high and high.getName() == settings.name then
-						focus()
-					else blur() end
-				elseif not high or high.getName() ~= settings.name then
-					blur()
+			elseif dialog and settings.active and e == "mouse_click" then
+				local dX, dY = dialog.getPos()
+				if p2 < dX or p2 > dX + dialog.getWidth() - 1 or p3 < dY or p3 > dY + dialog.getHeight() - 1 and ( p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height ) then
+					-- flash dialog
+					dialog.attentionFlash()
 				end
 			end
+
+			if e == "mouse_click" and registryFetch(settings.name) then
+				local high = getHighestLevel( p2, p3 )
+				if high then
+					if high.getType() == "stage" then
+						if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height and high.getName() == settings.name then
+							if not settings.active then focus() end
+						else blur() end
+					elseif high.getType() == "dialog" and high.getBind().getName() == settings.name then
+						local dX, dY = high.getPos()
+						if p2 >= dX and p2 <= dX + high.getWidth() - 1 and p3 >= dY and p3 <= dY + high.getHeight() - 1 then
+							if not settings.active then focus() end
+						else blur() end
+					elseif high then
+						if (high.getType() == "stage" and high.getName() ~= settings.name) or (high.getType() == "dialog" and high.getBind().getName() ~= settings.name) then blur() end
+					end
+				else blur() end
+			end
+
 		end
 
 		function new.destroy( self )
@@ -2404,6 +2448,9 @@ function createProgram( options )
 		end
 		local cb = false
 		local function exeOnEach( eArgs )
+			--[[
+				If that stage has a dialog box open, do not send the event to any running coroutines. However do send it to the runEvent function
+			]]
 			term.setCursorBlink( false )
 			local order = {}
 			for _, stage in ipairs( objects.stages ) do
@@ -2411,7 +2458,7 @@ function createProgram( options )
 				term.redirect( stage.getTerm() )
 				-- check if a message coroutine is active
 				local messageCo, pgCo = stage.getAlternate(), stage.getRunningProgram()
-				if stage.getActive() and messageCo and type( messageCo ) == "thread" and coroutine.status( messageCo ) == "suspended" then
+				if not stage.getDialog() and stage.getActive() and messageCo and type( messageCo ) == "thread" and coroutine.status( messageCo ) == "suspended" then
 					if ( tMessages[stage.getName()] == eArgs[1] or tMessages[stage.getName()] == nil ) then
 						local ok, param = coroutine.resume( messageCo, unpack( eArgs ) )
 						if coroutine.status( messageCo ) == "suspended" and ok and param then
@@ -2419,7 +2466,7 @@ function createProgram( options )
 							tMessages[stage.getName()] = param
 						elseif coroutine.status( messageCo ) == "dead" and not ok then error( param, 2 ) end -- errors in callbacks (crashed threads) will still be called and displayed
 					end
-				elseif stage.getActive() and pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( eArgs[1], stage ) then
+				elseif not stage.getDialog() and stage.getActive() and pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( eArgs[1], stage ) then
 					-- send event to runningProgram, check its status afterwards to determine if the program finished or crashed.
 					local ok, param = coroutine.resume( pgCo, unpack( eArgs ) )
 					if ok and coroutine.status( pgCo ) == "dead" then
@@ -2527,7 +2574,7 @@ function createProgram( options )
 		program.catchErrors = v
 	end
 
-	clone.startWindows = function( callback )
+	function clone.startWindows( callback )
 		local function cPrint( text, y, color )
 			if color then term.setTextColor( color ) end
 			term.setCursorPos( math.ceil( termX/2-(#text/2) ), y )
