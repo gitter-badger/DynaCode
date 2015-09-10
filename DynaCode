@@ -16,6 +16,9 @@
 	- Pass the nodes to the stage to be drawn.
 	And thats about it... although converting the XML is a tricky job when it comes to more 
 
+	For nodes that require focus (e.g. inputBox) they are able to set a scenes active node. Only one can be active at a time. When a node is active, any stages
+	using this scene will have their cursor position set and adjusted using the nodes updateFocus().
+
 
 ]]
 
@@ -256,10 +259,22 @@ else
 end
 
 local function copy(obj)
-  if type(obj) ~= 'table' then return obj end
-  local res = {}
-  for k, v in pairs(obj) do res[copy(k)] = copy(v) end
-  return res
+	if type(obj) ~= 'table' then return obj end
+	local res = {}
+	for k, v in pairs(obj) do res[copy(k)] = copy(v) end
+	return res
+end
+
+local function inTable( tTable, aValue )
+	if type( tTable ) == "table" then
+		if not aValue then return false end
+		for key, value in pairs( tTable ) do
+			if value == aValue then 
+				return true, key, value 
+			end
+		end
+	end
+	return false
 end
 
 local function validateRequirements( needed, provided, silent, prefix, suffix )
@@ -408,7 +423,8 @@ function createProgram( options )
 		scenes = {}, -- not drawn, just here to be accessed.
 		stages = {}, -- drawn
 		dialogs = {},
-		buffer = {}
+		buffer = {},
+		animations = {}
 	}
 	local programQueue, tEvents, reorderRequests = {}, {}, {}
 
@@ -758,6 +774,130 @@ function createProgram( options )
 
 	function clone.setDebugPauseOnException( v ) program.debugPauseOnException = v end
 
+	local animationPresets = {}
+	local validAnimationTargets = { 
+	["stage"] = {
+		"x", "y", "width", "height"
+	}, 
+	["button"] = {
+		"x", "y", "width", "height"
+	}, 
+	["label"] = {
+		"x", "y"
+	}}
+	local animationTimers = {}
+	function clone.createAnimation( sName, target, mode, setting, newValue, duration )
+		-- the animation must contain its current progress in the animation. This is a frame basis. The duration of the timer is linked to the duration and the difference of the values
+
+		if type( target ) ~= "table"
+		or type( sName ) ~= "string"
+		or type( mode ) ~= "string"
+		or type( setting ) ~= "string"
+		or type( newValue ) == "nil"
+		or type( duration ) ~= "number" then
+			error("Expected string, table, string, string, ANY, number", 2)
+		end
+
+		if type( target.getType ) ~= "function" then error("Invalid target. getType method not found") end
+
+		local targetType, valid = target.getType(), false
+		if validAnimationTargets[targetType] then
+			for _, property in ipairs( validAnimationTargets[targetType] ) do
+				if property == setting then valid = true break end
+			end
+			if not valid then error("Invalid property to animate, only\n"..(function()
+				local str = ""
+				for key, v in ipairs( validAnimationTargets[targetType] ) do str = str .. "- " ..v.."\n" end
+				str = str .. "Can be animated."
+				return str
+			end)()) end
+		else error("Cannot animate this target. Only\n"..(function()
+			local str = ""
+			for key, v in pairs( validAnimationTargets ) do str = str .. "- "..key.."\n" end
+			str = str .. "Can be animated."
+			return str
+		end)()) end
+
+		local function registryUpdate( self )
+			for k, v in ipairs( objects.animations ) do
+				if v and type(v) == "table" then
+					if v.getName() == sName then
+						table.remove( objects.animations, k )
+					end
+				end
+			end
+
+			table.insert( objects.animations, self )
+		end
+
+		if type( newValue ) ~= type( target.getAnimationProperty( setting ) ) then error("target value and animation type should match "..(type( newValue ) .. ", " .. type( target.getAnimationProperty( setting ) ))) end
+
+		-- This object will contain a couple of methods (resume, stop, pause, start) and some settings.
+		local animationDefaults = {}
+		local new = {}
+		local private = {}
+
+		local function calculateInterval()
+			-- get the difference of the two values
+			local oV = target.getAnimationProperty( setting ) -- Handle getting property values in each object.
+			if type( oV ) == "number" then
+				-- Get the difference of the two, (multiply by -1 if the number is negative). Then divide the result by the duration to get the interval (math.floor it)
+				local diff = oV - newValue
+				if diff < 0 then diff = diff * -1 end
+				if diff == 0 then private.interval = duration else
+					private.interval = math.floor( duration/diff ) -- How often we need to change the setting (advance the animation)
+				end
+			elseif type( oV ) == "string" then
+				-- Cannot really animate this, so set the animation interval to the duration.
+				private.interval = math.floor( duration )
+			end
+			-- We also need to step direction (negative or positive)
+			if oV-newValue < 0 then private.direction = -1 else private.direction = 1 end
+		end
+
+		local function setupPrivate()
+			calculateInterval()
+		end
+
+		local function updateInitialValue()
+
+		end
+
+		local function queueTimer( self )
+			-- queue a timer object containing the actual animation ( self )
+			animationTimers[os.startTimer( private.interval )] = {
+				animation = sName
+			}
+		end
+
+		function new.start( self ) registryUpdate( self ) queueTimer( self ) end
+		function new.resume( self ) end
+
+		function new.stop( self ) end
+		function new.pause( self ) end
+
+		function new.setLooping( self ) end -- if looping is true, the animation will animate from the original setting, to the new one, and back again. From there it will restart
+
+		function new.processFrame( self )
+			-- called by DynaCode event manager. Advances the animation by the correct increment.
+			target:setAnimationProperty( setting, target.getAnimationProperty( setting ) + 1, private.interval )
+			-- check if the animation is complete.
+			if target.getAnimationProperty( setting ) ~= newValue then
+				if type( target.getAnimationProperty( setting ) ) == type( newValue ) then
+					log("Restarting queue for animation "..sName)
+					queueTimer( self )
+				else
+					error("Types not same. AnimationProperty from target and newValue should be the same type")
+				end
+			end
+		end
+
+		function new.getName() return sName end
+		
+		setupPrivate()
+		return new
+	end
+
 	function clone.createDialog( cfg )
 		--[[
 			The dialog is stored in the programs registry, when the stage it is bound to is updated, the dialog box is also updated.
@@ -892,8 +1032,11 @@ function createProgram( options )
 
 		function new.getType() return "dialog" end
 
-		function new.flash()
-			
+		function new.attentionFlash()
+			for i = 1, 4 do
+				-- flash to attention twice.
+				
+			end
 		end
 
 		registryUpdate( new )
@@ -1242,60 +1385,6 @@ function createProgram( options )
 
 		end
 
-		--[[local function createDialog( nX, nY, width, height, tButtons, header, body )
-			if type( nX ) ~= "number"
-			or type( nY ) ~= "number"
-			or type( width ) ~= "number"
-			or type( height ) ~= "number"
-			or type( tButtons ) ~= "table" then
-				error("createDialog: Expected number, number, number, number, table", 2)
-			end
-			-- creates a dialog box relative to the stage (1,1 is top left of stage). Returns the clicked button (OK, Cancel, Retry, Close, Ignore)
-			-- A dialog box is an object full of properties (including a coroutine) that is bound to a window.
-			local new = {}
-			local nodes = {}
-			for key, button in ipairs( tButtons ) do
-				if type( button ) == "string" then table.insert( nodes, getPreset( button ) )
-				elseif type( button ) == "table" then
-					-- the user can specify the text, colors and position of the button in the dialog window.
-					table.insert( nodes, button )
-				else error("Invalid node passed, type of string or table expected got: "..type( button ), 2) end
-			end
-
-			local function draw()
-				-- draw, this will draw to the stageCanvas (end).
-				local txt = compileText(body, width, height)
-				term.setTextColor( colors.orange )
-				term.setBackgroundColor( colors.white )
-				local b = {}
-				for y = 1, height do
-					if not b[y] then b[y] = {} end
-					for x = 1, width do
-						if type( txt[y][x] ) == "string" then
-							b[y][x] = txt[y][x]
-						else b[y][x] = " " end
-					end
-				end
-				return b
-			end
-
-			function new.draw() return draw() end
-
-			new.co = coroutine.create(function()
-				while true do
-					local event = {coroutine.yield()}
-					if event[1] == "mouse_click" then
-						-- check if clicked on a node.
-					end
-				end
-			end)
-
-			return new
-
-		end]]
-
-
-
 		function new.getRedrawStatus( self ) return cache.needsRedraw end
 		function new.setRedrawStatus( self, v ) cache.needsRedraw = v end
 
@@ -1571,33 +1660,38 @@ function createProgram( options )
 		end
 
 		local function wrapProgram( path )
-			if runningProgram and coroutine.status( runningProgram ) == "suspended" then
-				error("wrapProgram: Program already running on stage", 2)
-			end
-			if not path or type( path ) ~= "string" then
-				error("wrapProgram: Expected: path String")
-			end
-			local func = false
-			if getfenv and setfenv and type( getfenv ) == "function" and type( setfenv ) == "function" then
-				local result, err = loadfile( path )
-				if not result then
-					if err then
-						error("wrapProgram: "..tostring( err ))
-					else
-						error("wrapProgram: Error while loading file.")
+			if type( path ) == "string" then
+				if runningProgram and coroutine.status( runningProgram ) == "suspended" then
+					error("wrapProgram: Program already running on stage", 2)
+				end
+				if not path or type( path ) ~= "string" then
+					error("wrapProgram: Expected: path String")
+				end
+				local func = false
+				if getfenv and setfenv and type( getfenv ) == "function" and type( setfenv ) == "function" then
+					local result, err = loadfile( path )
+					if not result then
+						if err then
+							error("wrapProgram: "..tostring( err ))
+						else
+							error("wrapProgram: Error while loading file.")
+						end
+					elseif result then
+						func = result
 					end
-				elseif result then
-					func = result
+					if func then
+						runningProgram = coroutine.create(function()
+							func()
+						end)
+						pgPath = path
+					else
+						error("wrapProgram: Could not load file")
+					end
 				end
-				if func then
-					runningProgram = coroutine.create(function()
-						func()
-					end)
-					pgPath = path
-				else
-					error("wrapProgram: Could not load file")
-				end
-			end
+			elseif type( path ) == "function" then
+				runningProgram = coroutine.create( path )
+				pgPath = false
+			else error("Expected path or run function") end
 		end
 
 		function new.getMerge()
@@ -1817,7 +1911,9 @@ function createProgram( options )
 				local nodes = settings.scene.getNodes()
 				for i = #nodes, 1, -1 do
 					local node = nodes[i]
-					local nodeX, nodeY, nodeW, nodeH = node.getPos(), node.getWidth(), node.getHeight()
+					local nodeX, nodeY = node.getPos()
+					local nodeW, nodeH = node.getWidth(), node.getHeight()
+					--local nodeX, nodeY, nodeW, nodeH = node.getPos(), node.getWidth(), node.getHeight()
 					local x, y = nX - settings.x + 1, nY - settings.y + 1 - offset
 					if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
 						onNode = node
@@ -1947,6 +2043,15 @@ function createProgram( options )
 			os.queueEvent( "deactivate", settings.name )
 			queueRedraw()
 		end
+
+		function new.getAnimationProperty( property )
+			if settings[property] then return settings[property] else error("Cannot find: "..tostring( property ) .. " on stage", 2) end
+		end
+
+		function new.setAnimationProperty( target, setting, value )
+			if settings[setting] then settings[setting] = value else error(setting.." not found in stage object") end
+		end
+
 		if settings.visible then queueRedraw() end
 		return new
 
@@ -2501,6 +2606,20 @@ function createProgram( options )
 					break
 				else
 					if exeOnEach( event ) == "stop" then break end
+				end
+
+				-- check the timer event for animations
+				if event[1] == "timer" and animationTimers[event[2]] then
+					local anim
+					for key, animation in pairs( objects.animations ) do
+						if animation.getName() == animationTimers[event[2]].animation then
+							anim = animation
+						end
+					end
+					if anim then
+						anim:processFrame()
+						--Continue the animation by one step (pixel/linear change)
+					end
 				end
 
 				if tEvents[event[1]] then

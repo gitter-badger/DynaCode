@@ -2,6 +2,6 @@
 build = 35,
 version = 3,
 changes = {
-		"* Fixed Dialog Window click detection (z-based)"
+		"+ Started animations"
 	}
 }
