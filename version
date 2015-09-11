@@ -1,16 +1,7 @@
-<<<<<<< HEAD
 {
 build = 36,
 version = 1,
 changes = {
 		"+ Input boxes"
 	}
-=======
-{
-build = 35,
-version = 3,
-changes = {
-		"+ Started animations"
-	}
->>>>>>> origin/master
 }
