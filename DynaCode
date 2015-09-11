@@ -16,6 +16,9 @@
 	- Pass the nodes to the stage to be drawn.
 	And thats about it... although converting the XML is a tricky job when it comes to more 
 
+	For nodes that require focus (e.g. inputBox) they are able to set a scenes active node. Only one can be active at a time. When a node is active, any stages
+	using this scene will have their cursor position set and adjusted using the nodes updateFocus().
+
 
 ]]
 
@@ -256,10 +259,22 @@ else
 end
 
 local function copy(obj)
-  if type(obj) ~= 'table' then return obj end
-  local res = {}
-  for k, v in pairs(obj) do res[copy(k)] = copy(v) end
-  return res
+	if type(obj) ~= 'table' then return obj end
+	local res = {}
+	for k, v in pairs(obj) do res[copy(k)] = copy(v) end
+	return res
+end
+
+local function inTable( tTable, aValue )
+	if type( tTable ) == "table" then
+		if not aValue then return false end
+		for key, value in pairs( tTable ) do
+			if value == aValue then 
+				return true, key, value 
+			end
+		end
+	end
+	return false
 end
 
 local function validateRequirements( needed, provided, silent, prefix, suffix )
@@ -322,7 +337,7 @@ local function convertOptions( presets, provided )
 			if temp then opts[option] = temp else error("Invalid option "..option..". Type table expected, could not unserialize string to table.") end
 		else opts[option] = value end
 	end
-
+	if not provided then error("no", 2) end
 	for option, value in pairs( provided ) do
 		if presets[option] then
 			local p = presets[option]
@@ -408,7 +423,8 @@ function createProgram( options )
 		scenes = {}, -- not drawn, just here to be accessed.
 		stages = {}, -- drawn
 		dialogs = {},
-		buffer = {}
+		buffer = {},
+		animations = {}
 	}
 	local programQueue, tEvents, reorderRequests = {}, {}, {}
 
@@ -646,8 +662,10 @@ function createProgram( options )
 				for y = yStart, yEnd do
 					if y + sY - 1 > termY then break end
 					for x = xStart, xEnd do
-						merged[ y + sY - 1 ][ x + sX - 1 ] = buffer[y][x] -- get the stages new buffer each time.
-						merged[ y + sY - 1 ][ x + sX - 1 ].defined = true
+						if x + sX > 1 and sY + y > 1 then
+							merged[ y + sY - 1 ][ x + sX - 1 ] = buffer[y][x] -- get the stages new buffer each time.
+							merged[ y + sY - 1 ][ x + sX - 1 ].defined = true
+						end
 					end
 				end
 			end
@@ -739,12 +757,9 @@ function createProgram( options )
 			if list[i].getType() == "stage" then
 				if list[i].getBorderless() then offset = 1 else offset = 0 end
 			else offset = 1 end
+			log( list[i].getType() )
+			--log(nX .. ", " .. nY .. ", " .. sX .. ", " .. sY, "w")
 			if nX >= sX and nX <= sX + list[i].getWidth() - 1 and nY >= sY and nY <= sY + list[i].getHeight() - offset then
-				if list[i].getType() == "stage" then 
-					log("highest level (stage): "..list[i].getName()) 
-				else 
-					log("highest level (dialog): "..list[i].getBind().getName()) 
-				end
 				return list[i]
 			end
 		end
@@ -757,6 +772,139 @@ function createProgram( options )
 	function clone.setDebugSleep( v ) program.debugWait = v end
 
 	function clone.setDebugPauseOnException( v ) program.debugPauseOnException = v end
+
+	local animationPresets = {}
+	local validAnimationTargets = { 
+	["stage"] = {
+		"x", "y", "width", "height"
+	}, 
+	["button"] = {
+		"x", "y", "width", "height"
+	}, 
+	["label"] = {
+		"x", "y"
+	}}
+	local animationTimers = {}
+	function clone.createAnimation( sName, target, mode, setting, newValue, duration )
+		-- the animation must contain its current progress in the animation. This is a frame basis. The duration of the timer is linked to the duration and the difference of the values
+
+		if type( target ) ~= "table"
+		or type( sName ) ~= "string"
+		or type( mode ) ~= "string"
+		or type( setting ) ~= "string"
+		or type( newValue ) == "nil"
+		or type( duration ) ~= "number" then
+			error("Expected string, table, string, string, ANY, number", 2)
+		end
+
+		if type( target.getType ) ~= "function" then error("Invalid target. getType method not found") end
+
+		local targetType, valid = target.getType(), false
+		if validAnimationTargets[targetType] then
+			for _, property in ipairs( validAnimationTargets[targetType] ) do
+				if property == setting then valid = true break end
+			end
+			if not valid then error("Invalid property to animate, only\n"..(function()
+				local str = ""
+				for key, v in ipairs( validAnimationTargets[targetType] ) do str = str .. "- " ..v.."\n" end
+				str = str .. "Can be animated."
+				return str
+			end)()) end
+		else error("Cannot animate this target. Only\n"..(function()
+			local str = ""
+			for key, v in pairs( validAnimationTargets ) do str = str .. "- "..key.."\n" end
+			str = str .. "Can be animated."
+			return str
+		end)()) end
+
+		local function registryUpdate( self )
+			for k, v in ipairs( objects.animations ) do
+				if v and type(v) == "table" then
+					if v.getName() == sName then
+						table.remove( objects.animations, k )
+					end
+				end
+			end
+
+			table.insert( objects.animations, self )
+		end
+
+		if type( newValue ) ~= type( target.getAnimationProperty( setting ) ) then error("target value and animation type should match "..(type( newValue ) .. ", " .. type( target.getAnimationProperty( setting ) ))) end
+
+		-- This object will contain a couple of methods (resume, stop, pause, start) and some settings.
+		local animationDefaults = {}
+		local new = {}
+		local private = {}
+
+		local function calculateInterval()
+			-- get the difference of the two values
+			local oV = target.getAnimationProperty( setting ) -- Handle getting property values in each object.
+			if type( oV ) == "number" then
+				-- Get the difference of the two, (multiply by -1 if the number is negative). Then divide the result by the duration to get the interval (math.floor it)
+				local diff = oV - newValue
+				if diff < 0 then diff = diff * -1 end
+				if diff == 0 then private.interval = duration else
+					private.interval = math.floor( duration/diff ) -- How often we need to change the setting (advance the animation)
+				end
+			elseif type( oV ) == "string" then
+				-- Cannot really animate this, so set the animation interval to the duration.
+				private.interval = math.floor( duration )
+			end
+		end
+
+		local function setupPrivate()
+			calculateInterval()
+		end
+
+		local function updateInitialValue()
+
+		end
+
+		local function queueTimer( self )
+			-- queue a timer object containing the actual animation ( self )
+			animationTimers[os.startTimer( private.interval )] = {
+				animation = sName
+			}
+		end
+
+		function new.start( self )
+			calculateInterval()
+			private.running = true
+			if target.getAnimationProperty( setting ) ~= newValue then
+				queueTimer( self )
+			end
+		end
+		function new.resume( self ) end
+
+		function new.stop( self ) private.running = false end
+		function new.pause( self ) end
+
+		function new.setLooping( self ) end -- if looping is true, the animation will animate from the original setting, to the new one, and back again. From there it will restart
+
+		function new.processFrame( self )
+			if target.getAnimationProperty( setting ) ~= newValue and private.running then
+				if target.getAnimationProperty(setting)-newValue < 0 then private.direction = 1 else private.direction = -1 end
+				-- called by DynaCode event manager. Advances the animation by the correct increment.
+				target:setAnimationProperty( setting, target.getAnimationProperty( setting ) + private.direction, private.interval )
+				-- check if the animation is complete.
+				if target.getAnimationProperty( setting ) ~= newValue and private.running then
+					if type( target.getAnimationProperty( setting ) ) == type( newValue ) then
+						queueTimer( self )
+					else
+						error("Types not same. AnimationProperty from target and newValue should be the same type")
+					end
+				else private.running = false end
+			end
+		end
+
+		function new.getName() return sName end
+
+		function new.getRunning() return private.running end
+
+		setupPrivate()
+		registryUpdate( new )
+		return new
+	end
 
 	function clone.createDialog( cfg )
 		--[[
@@ -892,8 +1040,11 @@ function createProgram( options )
 
 		function new.getType() return "dialog" end
 
-		function new.flash()
-			
+		function new.attentionFlash()
+			for i = 1, 4 do
+				-- flash to attention twice.
+				
+			end
 		end
 
 		registryUpdate( new )
@@ -1242,60 +1393,6 @@ function createProgram( options )
 
 		end
 
-		--[[local function createDialog( nX, nY, width, height, tButtons, header, body )
-			if type( nX ) ~= "number"
-			or type( nY ) ~= "number"
-			or type( width ) ~= "number"
-			or type( height ) ~= "number"
-			or type( tButtons ) ~= "table" then
-				error("createDialog: Expected number, number, number, number, table", 2)
-			end
-			-- creates a dialog box relative to the stage (1,1 is top left of stage). Returns the clicked button (OK, Cancel, Retry, Close, Ignore)
-			-- A dialog box is an object full of properties (including a coroutine) that is bound to a window.
-			local new = {}
-			local nodes = {}
-			for key, button in ipairs( tButtons ) do
-				if type( button ) == "string" then table.insert( nodes, getPreset( button ) )
-				elseif type( button ) == "table" then
-					-- the user can specify the text, colors and position of the button in the dialog window.
-					table.insert( nodes, button )
-				else error("Invalid node passed, type of string or table expected got: "..type( button ), 2) end
-			end
-
-			local function draw()
-				-- draw, this will draw to the stageCanvas (end).
-				local txt = compileText(body, width, height)
-				term.setTextColor( colors.orange )
-				term.setBackgroundColor( colors.white )
-				local b = {}
-				for y = 1, height do
-					if not b[y] then b[y] = {} end
-					for x = 1, width do
-						if type( txt[y][x] ) == "string" then
-							b[y][x] = txt[y][x]
-						else b[y][x] = " " end
-					end
-				end
-				return b
-			end
-
-			function new.draw() return draw() end
-
-			new.co = coroutine.create(function()
-				while true do
-					local event = {coroutine.yield()}
-					if event[1] == "mouse_click" then
-						-- check if clicked on a node.
-					end
-				end
-			end)
-
-			return new
-
-		end]]
-
-
-
 		function new.getRedrawStatus( self ) return cache.needsRedraw end
 		function new.setRedrawStatus( self, v ) cache.needsRedraw = v end
 
@@ -1470,12 +1567,8 @@ function createProgram( options )
 					break
 				end
 			end
-			oTerm.setBackgroundColor( getColor( windowBuffer.backgroundColor ) )
-			oTerm.setTextColor( getColor( windowBuffer.textColor ) )
-			local r = oTerm.write(sString)
 			oTerm.setBackgroundColor( program.backgroundColor )
 			oTerm.setTextColor( colors.white )
-			return r
 		end
 		function redirect.blit( sString, sBackground, sTextColor ) end
 
@@ -1571,33 +1664,38 @@ function createProgram( options )
 		end
 
 		local function wrapProgram( path )
-			if runningProgram and coroutine.status( runningProgram ) == "suspended" then
-				error("wrapProgram: Program already running on stage", 2)
-			end
-			if not path or type( path ) ~= "string" then
-				error("wrapProgram: Expected: path String")
-			end
-			local func = false
-			if getfenv and setfenv and type( getfenv ) == "function" and type( setfenv ) == "function" then
-				local result, err = loadfile( path )
-				if not result then
-					if err then
-						error("wrapProgram: "..tostring( err ))
-					else
-						error("wrapProgram: Error while loading file.")
+			if type( path ) == "string" then
+				if runningProgram and coroutine.status( runningProgram ) == "suspended" then
+					error("wrapProgram: Program already running on stage", 2)
+				end
+				if not path or type( path ) ~= "string" then
+					error("wrapProgram: Expected: path String")
+				end
+				local func = false
+				if getfenv and setfenv and type( getfenv ) == "function" and type( setfenv ) == "function" then
+					local result, err = loadfile( path )
+					if not result then
+						if err then
+							error("wrapProgram: "..tostring( err ))
+						else
+							error("wrapProgram: Error while loading file.")
+						end
+					elseif result then
+						func = result
 					end
-				elseif result then
-					func = result
+					if func then
+						runningProgram = coroutine.create(function()
+							func()
+						end)
+						pgPath = path
+					else
+						error("wrapProgram: Could not load file")
+					end
 				end
-				if func then
-					runningProgram = coroutine.create(function()
-						func()
-					end)
-					pgPath = path
-				else
-					error("wrapProgram: Could not load file")
-				end
-			end
+			elseif type( path ) == "function" then
+				runningProgram = coroutine.create( path )
+				pgPath = false
+			else error("Expected path or run function") end
 		end
 
 		function new.getMerge()
@@ -1685,7 +1783,7 @@ function createProgram( options )
 
 		function new.getPos( self ) return settings.x, settings.y end 
 
-		function new.setPos( nX, nY ) settings.x, settings.y = nX, nY end
+		function new.setPos( self, nX, nY ) settings.x, settings.y = nX, nY end
 
 		function new.getWidth() return settings.width end
 		function new.getHeight() return settings.height end
@@ -1808,7 +1906,8 @@ function createProgram( options )
 		function new.setMinWidth( self, v ) settings.minWidth = v end
 		function new.getMinWidth() return settings.minWidth end
 
-		local function handleMouseClick( self, event, button, nX, nY )
+		local function handleMouseClick( self, event )
+			local button, nX, nY = event[2], event[3], event[4]
 			local offset = (function() if settings.borderless then return 0 else return 1 end end)()
 			if nX < settings.x or nX > settings.x + settings.width - 1 or nY < settings.y or nY > settings.y + settings.height + offset then return end
 			local onNode = false
@@ -1817,7 +1916,9 @@ function createProgram( options )
 				local nodes = settings.scene.getNodes()
 				for i = #nodes, 1, -1 do
 					local node = nodes[i]
-					local nodeX, nodeY, nodeW, nodeH = node.getPos(), node.getWidth(), node.getHeight()
+					local nodeX, nodeY = node.getPos()
+					local nodeW, nodeH = node.getWidth(), node.getHeight()
+
 					local x, y = nX - settings.x + 1, nY - settings.y + 1 - offset
 					if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
 						onNode = node
@@ -1827,7 +1928,7 @@ function createProgram( options )
 			end
 			if onNode then
 				-- call the nodes onClick
-				onNode:checkEvent( event, button, nX, nY )
+				onNode:checkEvent( event, settings.name )
 			else
 				-- however, if the click was not on a node or there is no scene, check for window functions
 				if button == 1 and nX > settings.x and nX < settings.x + settings.width and nY == settings.y and not settings.borderless then
@@ -1840,7 +1941,8 @@ function createProgram( options )
 			
 		end
 
-		local function handleMouseDrag( self, event, button, nX, nY )
+		local function handleMouseDrag( self, event )
+			local button, nX, nY = event[2], event[3], event[4]
 			local offset = (function() if not settings.borderless then return 0 else return 1 end end)()
 			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y and settings.moveable and settings.active then
 				if nX < settings.lastClickX and (settings.allowOffScreen or settings.x - 1 > 0) then
@@ -1888,23 +1990,41 @@ function createProgram( options )
 
 		end
 
-		function new.runEvent( self, e, p1, p2, p3, p4 )
+		function new.runEvent( self, event )
+			local e, p1, p2, p3 = event[1], event[2], event[3], event[4]
+			log( e )
 
-			runCallback("event", {e, p1, p2, p3, p4})
+			runCallback("event", event )
 			if e == "deactivate" then
 				if p1 == settings.name then focus() else blur() end
 			end
 			if not dialog and settings.active then
+
+				--[[if settings.scene and settings.scene.getNodeFocus() then
+					local node = settings.scene.getNodeFocus()
+					node:checkEvent( event )
+				end]]
+				if settings.scene then
+					for _, node in ipairs( settings.scene.getNodes() ) do
+						if node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, settings.name ) elseif settings.scene.getNodeFocus() == node then node:checkEvent( event, settings.name ) end
+						if node.getCursorBlink and node.getCursorBlink() then
+							term.setCursorBlink( true )
+							local nX, nY = node.getCursorPos()
+							term.setCursorPos( settings.x + nX - 1, settings.y + nY )
+						end
+					end
+				end
+
 				if e == "mouse_click" then
-					handleMouseClick( self, e, p1, p2, p3 )
+					handleMouseClick( self, event )
 				elseif e == "mouse_scroll" then
-					handleMouseScroll( self, e, p1, p2, p3 )
+					handleMouseScroll( self, event )
 				elseif e == "mouse_drag" then
-					handleMouseDrag( self, e, p1, p2, p3 )
+					handleMouseDrag( self, event )
 				elseif e == "key" then
-					handleKeyPress( self, e, p1, p2 )
+					handleKeyPress( self, event )
 				elseif e == "char" then
-					handleCharPress( self, e, p1 )
+					handleCharPress( self, event )
 				elseif e == "terminate" and settings.allowTerminate then
 					terminate()
 				end
@@ -1918,6 +2038,7 @@ function createProgram( options )
 
 			if e == "mouse_click" and registryFetch(settings.name) then
 				local high = getHighestLevel( p2, p3 )
+				--error( high )
 				if high then
 					if high.getType() == "stage" then
 						if p2 >= settings.x and p2 <= settings.x + settings.width - 1 and p3 >= settings.y and p3 <= settings.y + settings.height and high.getName() == settings.name then
@@ -1947,12 +2068,125 @@ function createProgram( options )
 			os.queueEvent( "deactivate", settings.name )
 			queueRedraw()
 		end
+
+		function new.getAnimationProperty( property )
+			if settings[property] then return settings[property] else error("Cannot find: "..tostring( property ) .. " on stage", 2) end
+		end
+
+		function new.setAnimationProperty( target, setting, value )
+			if settings[setting] then settings[setting] = value else error(setting.." not found in stage object") end
+		end
+
 		if settings.visible then queueRedraw() end
 		return new
 
 	end
 
-	clone.createScene = function( cfg )
+	function clone.createPane( cfg )
+		local xmlCallbacks = {
+			["button"] = clone.createButton,
+			["label"] = clone.createLabel,
+			["pane"] = clone.createPane,
+			["input"] = clone.createInput
+		}
+		--cfg = convertOptions( {}, cfg )
+		--[[
+			A pane can contain nodes, a pane is itself a node and should be added to a scene. Any nodes within the pane are drawn relative to the panes position
+			allowing one to animate the pane, resulting in its contents moving as well.
+
+			One may imagine it as a mini stage settable via XML.
+
+			<pane x="1" y="1">
+				<button></button>
+				<label></label>
+			</pane>
+		]]
+		local paneDefaults = {
+			width = 10,
+			height = 5,
+			backgroundColor = "red",
+			textColor = "black",
+			x = 1,
+			y = 1
+		}
+		local settings = {}
+		setmetatable( cfg, {__index=paneDefaults} )
+		setmetatable( settings, {__index=cfg} )
+		local private = {
+			nodes = {}
+		}
+		local new = {}
+
+		local function processNode() end
+
+		function new.handleXML( self, content )
+			-- Get the inner nodes, if a node can contain other nodes, add the node and pass it the XML to handle.
+			log( "pane: "..textutils.serialize(content) )
+			for key, xml in ipairs( content ) do
+				--# find this panes content (main label is this pane)
+				if key ~= "label" and key ~= "content" and key ~= "xargs" and type( xml ) == "table" then
+					if xmlCallbacks[xml.label] then
+						local node = xmlCallbacks[xml.label]( xml.xarg )
+						node:setScene( private.scene )
+						if node.getContains and type( node.getContains ) == "function" and node.getContains() then
+							node:handleXML( xml )
+						end
+					else error("Unknown node: "..xml.label) end
+				else log( key, "e" ) end
+			end
+		end
+
+		-- Needs methods for adding, removing and getting nodes from within
+		function new.addNode( self, v ) error( v ) end
+		function new.removeNode( self, v ) end
+		function new.getNode( self, v ) end
+		function new.clearNodes( self ) end
+		function new.getNodes( self ) end
+
+		function new.setScene( self, v ) end
+		function new.getScene( self ) end
+
+		function new.getAnimationProperty( self, v ) end
+		function new.setAnimationProperty( self, v ) end
+
+		function new.drawToTable(tBuffer, nWidth, nHeight, nOffset, sStage)
+			for y = 1, settings.height do
+				if y > nHeight then break end
+				for x = 1, settings.width do
+					if x <= nWidth then
+						tBuffer[y][x] = { char = " ", backgroundColor = settings.backgroundColor, textColor = settings.textColor, nDefined = true }
+					end
+				end
+			end
+			--Draw the contained nodes (and the background color of the pane)
+			for i = 1, #private.nodes do
+				local node = private.nodes[i]
+				if node.drawToTable then node.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage ) end
+			end
+		end
+		function new.getWidth( self ) return settings.width end
+		function new.getHeight( self ) return settings.height end
+		function new.getPos( self, v ) return settings.x, settings.y end
+		function new.setPos( self, nX, nY ) settings.x, settings.y = nX, nY end
+
+		function new.checkEvent( self )
+
+		end -- pass the event to nodes that were subject to the change.
+
+		function new.getContains() return true end
+
+		return new
+	end
+
+	function clone.createBox() end
+
+	function clone.createScene( cfg )
+		local xmlCallbacks = {
+			["button"] = clone.createButton,
+			["label"] = clone.createLabel,
+			["pane"] = clone.createPane,
+			["input"] = clone.createInput
+		}
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your scene.")
 		local sceneDefault = {}
 		local new = {}
@@ -1960,7 +2194,8 @@ function createProgram( options )
 		local private = {
 			nodes = {},
 			controller = {},
-			needsRedraw = true
+			needsRedraw = true,
+			nodeFocus = false
 		}
 
 		-- The scene is attached to a stage. The scene _can_ be used on multiple stages.
@@ -1985,24 +2220,19 @@ function createProgram( options )
 
 			table.insert( objects.scenes, self )
 		end
-		local validXML = {"button", "label"}
-		local xmlCallbacks = {
-			["button"] = clone.createButton,
-			["label"] = clone.createLabel
-		}
 		local function getXML( path )
 
 			local function processNode( xml )
 				-- fully create the node, buttons and other objects do not require a name mainly because they are always stored inside the scene. Although without a name specified scene.getNode(string Name) will not work (throws Exception)
-				if xmlCallbacks[xml.label] then
-					local args = xml.xarg
-					if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end end
-					local node = xmlCallbacks[xml.label]( args )
-					node:setScene( new )
-					if node then return node else error("Failed to create "..xml.label.." node using designated method") end
-				else
-					log("nodeType "..nodeType.." has no designated callback", "w")
+				local args = xml.xarg
+				if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end end
+				local node = xmlCallbacks[xml.label]( args )
+				if not node or type( node ) ~= "table" then error("Invalid callback response for "..tostring( xml.label ).." creation, response: "..tostring( node )) end
+				node:setScene( new )
+				if node.getContains and type(node.getContains) == "function" and node.getContains() then
+					node:handleXML( xml )
 				end
+				if node then return node else error("Failed to create "..xml.label.." node using designated method") end
 			end
 
 			if fs.exists( path ) then
@@ -2010,15 +2240,15 @@ function createProgram( options )
 				local content = f.readAll()
 				f.close()
 				content = XMLStringToTable( content )
+				log( textutils.serialize( content ) )
 				if #content <= 0 then return false else
 					-- check if an XML tag (label) is valid.
 					local nodes = {}
 					for key, xml in pairs( content ) do
-						for _, node in pairs( validXML ) do
-							if node == xml.label then
-								-- process the node.
-								table.insert( nodes, processNode( xml ) )
-							end
+						local valid = false
+						log(xml.label)
+						if not xmlCallbacks[xml.label] then error("Unknown node: "..xml.label) else
+							table.insert( nodes, processNode(xml) )
 						end
 					end
 					return nodes
@@ -2104,11 +2334,19 @@ function createProgram( options )
 			registryRemove( settings.name )
 		end
 
+		function new.setNodeFocus( self, node )
+			private.nodeFocus = node
+		end
+		function new.getNodeFocus( self ) 
+			return private.nodeFocus
+		end
+
 		registryUpdate( new )
 		return new
 	end
 
 	function clone.createButton( cfg )
+		if not cfg then error( "no cfg", 2 ) end
 		cfg = convertOptions({
 			["name"] = "string",
 			["x"] = "number",
@@ -2256,8 +2494,8 @@ function createProgram( options )
 		function new.setOnClick() end
 		function new.getOnClick() return settings.onClick end
 
-		function new.checkEvent( self, event, p1, p2, p3, p4 )
-			if event == "mouse_click" then
+		function new.checkEvent( self, event, stage )
+			if event[1] == "mouse_click" then
 				if type( settings.onClick ) == "function" then
 					settings.onClick( self )
 				elseif type( settings.onClick ) == "string" then
@@ -2274,13 +2512,15 @@ function createProgram( options )
 	end
 
 	function clone.createLabel( cfg )
-		cfg = convertOptions({
-			["name"] = "string",
-			["x"] = "number",
-			["y"] = "number",
-			["text"] = "string",
-			["name"] = "string"
-		}, cfg)
+		if cfg then 
+			cfg = convertOptions({
+				["name"] = "string",
+				["x"] = "number",
+				["y"] = "number",
+				["text"] = "string",
+				["name"] = "string"
+			}, cfg)
+		else cfg = {} end
 		validateRequirements({}, cfg)
 		-- returns a new object
 		local buttonDefaults = {
@@ -2384,35 +2624,113 @@ function createProgram( options )
 		local inputDefaults = {
 			x = 1,
 			y = 1,
-			limit = 10,
+			width = 10, --# limits text
 			replace = false,
 			textColor = "orange",
 			backgroundColor = "gray",
 			focused = false,
 			enabled = true,
-			visible = true
+			visible = true,
+			value = ""
 		}
-		local new = {}
+		local new, private, settings = {}, { scene = false, position = 0 }, {}
+		setmetatable( cfg, {__index=inputDefaults})
+		setmetatable( settings, {__index=cfg})
 
 		local function drawToTable() end
 		local function handleChar() end
 		local function handleKey() end
 
-		function new.drawToTable() end
+		function new.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage )
+			if settings.visible then
+				local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
+				local tText = {}
+				for charIndex = 1, string.len( settings.value ) do tText[charIndex] = string.sub( settings.value, charIndex, charIndex ) end
+				for x = 1, settings.width do
+					if x <= nWidth and settings.y <= nHeight then
+						tBuffer[settings.y][x+settings.x-1] = {
+							textColor = util.getColor( settings.textColor ),
+							backgroundColor = util.getColor( settings.backgroundColor ),
+							char = tText[x] or " ",
+							nDefined = true
+						}
+					end
+				end
+			end
+		end
 
-		function new.getPos() end
+		function new.getPos() return settings.x, settings.y end
 		function new.setX() end
 		function new.setY() end
+
+		function new.getHeight() return 1 end
+		function new.getWidth() return settings.width end
+
+		function new.setWidth( self, v ) settings.width = v end
 
 		function new.getTyped() end
 		function new.setTyped() end
 
-		function new.getWidth() end
+		function new.setScene( self, scene ) private.scene = scene end
 
-		function new.setLimit() end
-		function new.getLimit() end
+		function new.checkEvent( self, event, stage )
+			local stage = assert( registryFetch( stage ), "Invalid stage: "..stage)
+			if event[1] == "mouse_click" then
+				if event[2] == 1 then
+					local sX, sY = stage.getPos()
+					local x, y = event[3] - sX + 1, event[4] - sY + 1
+					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y + (function() if stage.getBorderless() then return 0 else return 1 end end)() then
+						if private.scene then
+							--# Add focus
+							settings.focused = true
+							private.scene.setNodeFocus( self )
+						else error("Scene object not found") end
+					else
+						--# Remove focus
+						settings.focused = false
+						private.scene.setNodeFocus( false )
+					end
+				end
+			elseif event[1] == "char" then
+				private.scene:setRedrawStatus( true )
+				stage:setRedrawStatus( true )
+				log( #settings.value .. ', ' .. settings.value )
+				if settings.focused and #settings.value < settings.width then
+					settings.value = string.sub( settings.value, 1, private.position ) .. event[2] .. string.sub( settings.value, private.position + 1 )
+					private.position = private.position + 1
+				end
+			elseif event[1] == "key" then
+				private.scene:setRedrawStatus( true )
+				stage:setRedrawStatus( true )
+				if settings.focused then
+					if event[2] == keys.backspace then
+						if #settings.value > 0 and private.position > 0 then
+							settings.value = string.sub( settings.value, 1, private.position - 1) .. string.sub( settings.value, private.position + 1 )
+							private.position = private.position - 1
+							if private.position < 1 then private.position = 0 end
+							log( #settings.value .. ', ' .. settings.value )
+						end
+					elseif event[2] == keys.left then
+						private.position = private.position - 1
+						if private.position < 0 then private.position = 0 end
+					elseif event[2] == keys.right then
+						private.position = private.position + 1
+						if private.position > #settings.value then private.position = #settings.value end
+					elseif event[2] == keys.home then
+						private.position = 0
+					elseif event[2] == keys["end"] then
+						private.position = #settings.value
+					elseif event[2] == keys.enter then
+						error( settings.value )
+					end
+				end
+			end
+		end
 
-		--function new.
+		function new.sendAllEvents() return true end
+
+		function new.getCursorBlink() return settings.focused end
+		function new.getCursorPos() return private.position + 1, 1 end
 
 		return new
 	end
@@ -2444,6 +2762,7 @@ function createProgram( options )
 				for key, e in ipairs( stage.getEventWhitelist() ) do
 					if e == event then return true end
 				end
+				return inTable( activeEvent, event )
 			end
 		end
 		local cb = false
@@ -2452,9 +2771,8 @@ function createProgram( options )
 				If that stage has a dialog box open, do not send the event to any running coroutines. However do send it to the runEvent function
 			]]
 			term.setCursorBlink( false )
-			local order = {}
 			for _, stage in ipairs( objects.stages ) do
-				stage:runEvent( unpack( eArgs ) )
+				stage:runEvent( eArgs )
 				term.redirect( stage.getTerm() )
 				-- check if a message coroutine is active
 				local messageCo, pgCo = stage.getAlternate(), stage.getRunningProgram()
@@ -2466,7 +2784,7 @@ function createProgram( options )
 							tMessages[stage.getName()] = param
 						elseif coroutine.status( messageCo ) == "dead" and not ok then error( param, 2 ) end -- errors in callbacks (crashed threads) will still be called and displayed
 					end
-				elseif not stage.getDialog() and stage.getActive() and pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( eArgs[1], stage ) then
+				elseif pgCo and type( pgCo ) == "thread" and coroutine.status( pgCo ) == "suspended" and filterEvent( eArgs[1], stage ) then
 					-- send event to runningProgram, check its status afterwards to determine if the program finished or crashed.
 					local ok, param = coroutine.resume( pgCo, unpack( eArgs ) )
 					if ok and coroutine.status( pgCo ) == "dead" then
@@ -2484,7 +2802,7 @@ function createProgram( options )
 				end
 				if stage.getActive() then
 					-- get the cursor state of this stage and store it.
-					cb = stage.getCursorBlink()
+					--cb = stage.getCursorBlink()
 				end
 				term.redirect( oTerm )
 			end
@@ -2503,6 +2821,20 @@ function createProgram( options )
 					if exeOnEach( event ) == "stop" then break end
 				end
 
+				-- check the timer event for animations
+				if event[1] == "timer" and animationTimers[event[2]] then
+					local anim
+					for key, animation in pairs( objects.animations ) do
+						if animation.getName() == animationTimers[event[2]].animation then
+							anim = animation
+						end
+					end
+					if anim then
+						anim:processFrame()
+						--Continue the animation by one step (pixel/linear change)
+					end
+				end
+
 				if tEvents[event[1]] then
 					for key, ev in ipairs( tEvents[event[1]] ) do
 						if type( ev ) == "table" then ev.cb(unpack( event )) else ev(unpack( event )) end
@@ -2515,7 +2847,7 @@ function createProgram( options )
 				reorderRequests = {}
 
 				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then drawAll() end
-				term.setCursorBlink( cb )
+				--term.setCursorBlink( cb )
 			end
 		end
 		-- Draw every stage

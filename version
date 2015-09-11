@@ -1,7 +1,7 @@
 {
-build = 35,
-version = 3,
+build = 36,
+version = 1,
 changes = {
-		"* Fixed Dialog Window click detection (z-based)"
+		"+ Input boxes"
 	}
 }
