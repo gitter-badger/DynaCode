@@ -715,6 +715,7 @@ function createProgram( options )
 		end
 		objects.buffer = copy( oBuffer )
 		term.setCursorPos( oX, oY )
+		--term.setCursorBlink( true )
 	end
 
 	local function drawAll()
@@ -1079,25 +1080,34 @@ function createProgram( options )
 			minWidth = 12,
 			minHeight = 5,
 			maxWidth = 12,
-			maxHeight = 12
+			maxHeight = 12,
+			onEvent = false,
+			onResize = false,
+			onClose = false,
+			onReposition = false,
+			onThreadTermination = false,
+			onFocus = false,
+			onBlur = false,
+			onThreadCrash = false,
+			onThreadFinish = false
 		} -- manual settings will override these
-		local stageCallbacks = {
-			["event"] = false,
-			["resize"] = false,
-			["close"] = false,
-			["reposition"] = false,
-			["threadTerminate"] = false,
-			["focus"] = false,
-			["blur"] = false,
-			["threadCrash"] = false,
-			["threadFinish"] = false
-		}
 		local window, windowBuffer, new, settings, cache, cacheDefaults, stageCanvas = {}, {}, {}, {}, {}, { needsRedraw = true, redrawNodes = true }, {}
 		setmetatable( stageDefaults, {__index = defaults})
 		setmetatable( cfg, {__index = stageDefaults} )
 		setmetatable( settings, {__index=cfg} )
 		setmetatable( cache, {__index=cacheDefaults})
 		local dialog = false
+		local stageCallbacks = {
+			["event"] = settings.onEvent,
+			["resize"] = settings.onResize,
+			["close"] = settings.onClose,
+			["reposition"] = settings.onReposition,
+			["threadTerminate"] = settings.onThreadTermination,
+			["focus"] = settings.onFocus,
+			["blur"] = settings.onBlur,
+			["threadCrash"] = settings.onThreadCrash,
+			["threadFinish"] = settings.onThreadFinish
+		}
 
 		local bufferDefaults = {
 			cursorBlink = false, 
@@ -1322,7 +1332,7 @@ function createProgram( options )
 			cache.redrawNodes = true
 			--reorderBufferLevels( settings.name )
 			addReorderRequestToQueue( settings.name )
-			if windowBuffer.cursorBlink then term.setCursorBlink( true ) term.setCursorPos(1,1) end
+			if windowBuffer.cursorBlink then --[[term.setCursorBlink( true )]] term.setCursorPos(1,1) end
 		end
 
 		local function blur()
@@ -1469,7 +1479,7 @@ function createProgram( options )
 		function new.getTerm() return redirect end
 
 		local function updateCursorBlink()
-			oTerm.setCursorBlink( windowBuffer.cursorBlink )
+			--oTerm.setCursorBlink( windowBuffer.cursorBlink )
 		end
 
 		local function setupBuffer( table, offset )
@@ -2008,7 +2018,7 @@ function createProgram( options )
 					for _, node in ipairs( settings.scene.getNodes() ) do
 						if node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, settings.name ) elseif settings.scene.getNodeFocus() == node then node:checkEvent( event, settings.name ) end
 						if node.getCursorBlink and node.getCursorBlink() then
-							term.setCursorBlink( true )
+							--term.setCursorBlink( true )
 							local nX, nY = node.getCursorPos()
 							term.setCursorPos( settings.x + nX - 1, settings.y + nY )
 						end
@@ -2259,7 +2269,7 @@ function createProgram( options )
 		end
 
 		local function getFromController( sName )
-			return private.controller[sName] or false
+			return private.nodes[sName] or false
 		end
 		local function removeFromController( sName )
 			private.controller[sName] = nil
@@ -2319,7 +2329,7 @@ function createProgram( options )
 
 		function new.getNode( self, name )
 			for key, node in ipairs( private.nodes ) do
-				if node.getName() and node.getName() == name then return node end
+				if node.getName and node.getName() == name then return node end
 			end
 			return false
 		end
@@ -2621,6 +2631,14 @@ function createProgram( options )
 
 	function clone.createInput( cfg )
 		-- focusable node. Only receives key/char events when focused
+		cfg = convertOptions({
+			["x"] = "number",
+			["y"] = "number",
+			["width"] = "number",
+			["focused"] = "boolean",
+			["enabled"] = "boolean",
+			["visible"] = "boolean"
+		}, cfg)
 		local inputDefaults = {
 			x = 1,
 			y = 1,
@@ -2631,11 +2649,56 @@ function createProgram( options )
 			focused = false,
 			enabled = true,
 			visible = true,
-			value = ""
+			value = "",
+			onSubmit = false,
+			onKeyPressed = false,
+			onCharPressed = false,
+			onFocus = false,
+			onBlur = false,
+			name = false
 		}
 		local new, private, settings = {}, { scene = false, position = 0 }, {}
 		setmetatable( cfg, {__index=inputDefaults})
 		setmetatable( settings, {__index=cfg})
+
+		local inputCallbacks = {
+			["submit"] = "onSubmit",
+			["key"] = "onKeyPressed",
+			["char"] = "onCharPressed",
+			["blur"] = "onBlur",
+			["focus"] = "onFocus"
+		}
+
+		local function runCallback(self, name, tPass, keepPacked)
+
+			if inputCallbacks[name] then
+				if settings[inputCallbacks[name]] then
+					local cb = settings[inputCallbacks[name]]
+					if type( cb ) == "function" then
+						if keepPacked or type( tPass ) ~= "table" then cb( self, tPass ) else cb( self, unpack( tPass ) ) end
+					elseif type( cb ) == "string" then
+						if cb:sub(1,1) == "#" and private.scene then
+							if keepPacked or type( tPass ) ~= "table" then
+								private.scene.runFromController( cb:sub(2), self, tPass )
+							else
+								private.scene.runFromController( cb:sub(2), self, unpack( tPass ))
+							end
+						elseif not private.scene and cb:sub(1,1) then error("No scene object") end
+					end
+				end
+			end
+
+		end
+
+		local function getCallback( cb )
+			return settings[inputCallbacks[cb]] or false
+		end
+
+		local function setCallback( cb, v )
+			if inputCallbacks[cb] then
+				settings[inputCallbacks[cb]] = v
+			end
+		end
 
 		local function drawToTable() end
 		local function handleChar() end
@@ -2645,7 +2708,7 @@ function createProgram( options )
 			if settings.visible then
 				local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
 				local tText = {}
-				for charIndex = 1, string.len( settings.value ) do tText[charIndex] = string.sub( settings.value, charIndex, charIndex ) end
+				for charIndex = 1, string.len( settings.value ) do if settings.replace then tText[charIndex] = settings.replace:sub(1,1) else tText[charIndex] = string.sub( settings.value, charIndex, charIndex ) end end
 				for x = 1, settings.width do
 					if x <= nWidth and settings.y <= nHeight then
 						tBuffer[settings.y][x+settings.x-1] = {
@@ -2682,24 +2745,27 @@ function createProgram( options )
 					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y + (function() if stage.getBorderless() then return 0 else return 1 end end)() then
 						if private.scene then
 							--# Add focus
+							runCallback( self, "focus", event )
 							settings.focused = true
-							private.scene.setNodeFocus( self )
+							private.scene:setNodeFocus( self )
 						else error("Scene object not found") end
 					else
 						--# Remove focus
+						runCallback( self, "blur", event )
 						settings.focused = false
-						private.scene.setNodeFocus( false )
+						private.scene:setNodeFocus( false )
 					end
 				end
 			elseif event[1] == "char" then
+				runCallback( self, "char", event )
 				private.scene:setRedrawStatus( true )
 				stage:setRedrawStatus( true )
-				log( #settings.value .. ', ' .. settings.value )
 				if settings.focused and #settings.value < settings.width then
 					settings.value = string.sub( settings.value, 1, private.position ) .. event[2] .. string.sub( settings.value, private.position + 1 )
 					private.position = private.position + 1
 				end
 			elseif event[1] == "key" then
+				runCallback( self, "key", event )
 				private.scene:setRedrawStatus( true )
 				stage:setRedrawStatus( true )
 				if settings.focused then
@@ -2708,7 +2774,6 @@ function createProgram( options )
 							settings.value = string.sub( settings.value, 1, private.position - 1) .. string.sub( settings.value, private.position + 1 )
 							private.position = private.position - 1
 							if private.position < 1 then private.position = 0 end
-							log( #settings.value .. ', ' .. settings.value )
 						end
 					elseif event[2] == keys.left then
 						private.position = private.position - 1
@@ -2721,7 +2786,8 @@ function createProgram( options )
 					elseif event[2] == keys["end"] then
 						private.position = #settings.value
 					elseif event[2] == keys.enter then
-						error( settings.value )
+						--# onsubmit callback here.
+						runCallback( self, "submit" )
 					end
 				end
 			end
@@ -2729,8 +2795,49 @@ function createProgram( options )
 
 		function new.sendAllEvents() return true end
 
-		function new.getCursorBlink() return settings.focused end
+		function new.getCursorBlink() return ( settings.focused and private.position < settings.width and true ) or false end
 		function new.getCursorPos() return private.position + 1, 1 end
+
+		function new.getTextColor() return settings.textColor end
+
+		function new.getName() return settings.name end
+
+		--[[ Callbacks ]]--
+
+		function new.setSubmitCallback( self, v ) 
+			setCallback( "submit", v )
+		end
+		function new.getSubmitCallback( self ) 
+			return getCallback( "submit" )			
+		end
+
+		function new.setKeyCallback( self, v ) 
+			setCallback( "key", v )
+		end
+		function new.getKeyCallback( self ) 
+			return getCallback( "key" )
+		end
+
+		function new.setCharCallback( self, v ) 
+			setCallback( "char", v )
+		end
+		function new.getCharCallback( self ) 
+			return getCallback( "char" )
+		end
+
+		function new.setFocusCallback( self, v ) 
+			setCallback( "focus", v )
+		end
+		function new.getFocusCallback( self ) 
+			return getCallback( "focus" )
+		end
+
+		function new.setBlurCallback( self, v ) 
+			setCallback( "blur", v )
+		end
+		function new.getBlurCallback( self ) 
+			return getCallback( "blur" )
+		end
 
 		return new
 	end
@@ -2765,7 +2872,7 @@ function createProgram( options )
 				return inTable( activeEvent, event )
 			end
 		end
-		local cb = false
+		local cb, aStage = false, false
 		local function exeOnEach( eArgs )
 			--[[
 				If that stage has a dialog box open, do not send the event to any running coroutines. However do send it to the runEvent function
@@ -2802,7 +2909,8 @@ function createProgram( options )
 				end
 				if stage.getActive() then
 					-- get the cursor state of this stage and store it.
-					--cb = stage.getCursorBlink()
+					cb = stage.getCursorBlink()
+					aStage = stage
 				end
 				term.redirect( oTerm )
 			end
@@ -2831,7 +2939,6 @@ function createProgram( options )
 					end
 					if anim then
 						anim:processFrame()
-						--Continue the animation by one step (pixel/linear change)
 					end
 				end
 
@@ -2847,7 +2954,38 @@ function createProgram( options )
 				reorderRequests = {}
 
 				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then drawAll() end
-				--term.setCursorBlink( cb )
+
+				local function cbSet( aStage, scene )
+					log("cbSet", "e")
+				end
+
+				local function nodeSet( aStage, scene )
+					local node = scene.getNodeFocus()
+					if node then
+						if node.getCursorBlink and node.getCursorBlink() then
+							local nX, nY = node.getPos()
+							local sX, sY = aStage.getPos()
+							local nodeCX, nodeCY = node.getCursorPos()
+							term.setCursorPos(nX + sX + nodeCX - 2, nY + sY + nodeCY - (function() if aStage.getBorderless() then return 2 else return 1 end end)())
+							term.setTextColor( aStage.getColor( node.getTextColor() ) )
+							term.setCursorBlink( true )
+							return true
+						else return false end
+					else
+						return false
+					end
+				end
+
+				if aStage.getScene() then
+					local scene = aStage.getScene()
+					if not nodeSet( aStage, scene ) then
+						-- set the cursor to the term redirects position
+						cbSet()
+					end
+				else
+					-- set the cursor to the term redirects position
+					cbSet()
+				end
 			end
 		end
 		-- Draw every stage
