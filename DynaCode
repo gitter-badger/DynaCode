@@ -1080,7 +1080,7 @@ function createProgram( options )
 			minWidth = 12,
 			minHeight = 5,
 			maxWidth = 12,
-			maxHeight = 12,
+			maxHeight = 5,
 			onEvent = false,
 			onResize = false,
 			onClose = false,
@@ -2197,6 +2197,15 @@ function createProgram( options )
 			["pane"] = clone.createPane,
 			["input"] = clone.createInput
 		}
+		local nodeRequiredMethods = {
+			"getPos",
+			"setPos",
+			"drawToTable",
+			"setScene",
+			"checkEvent",
+			"getHeight",
+			"getWidth"
+		}
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your scene.")
 		local sceneDefault = {}
 		local new = {}
@@ -2205,7 +2214,9 @@ function createProgram( options )
 			nodes = {},
 			controller = {},
 			needsRedraw = true,
-			nodeFocus = false
+			nodeFocus = false,
+			tabOrder = {},
+			tabIndex = 1
 		}
 
 		-- The scene is attached to a stage. The scene _can_ be used on multiple stages.
@@ -2230,6 +2241,33 @@ function createProgram( options )
 
 			table.insert( objects.scenes, self )
 		end
+
+		local function reorderTabIndex()
+			private.tabOrder = {}
+			for _, node in ipairs( private.nodes ) do
+				if node.getTabIndex and node.getTabIndex() then
+					if not node.blur or node.focus then error("TabIndexed node requires blur and focus methods.") else
+						table.insert( private.tabOrder, node )
+					end
+				end
+			end
+			table.sort( private.tabOrder, function( a, b ) return a.getTabIndex() < b.getTabIndex() end )
+		end
+		local function nextTabIndex() 
+			if tabOrder[private.tabIndex + 1] then
+				-- go back to next node.
+				tabOrder[private.tabIndex]:blur()
+				tabOrder[private.tabIndex+1]:focus()
+				private.tabIndex = private.tabIndex + 1
+			elseif tabOrder[1] then
+				tabOrder[private.tabIndex]:blur()
+				tabOrder[1]:focus()
+				private.tabIndex = 1
+				-- go back to beginning.
+			end
+		end
+		local function previousTabIndex() end
+
 		local function getXML( path )
 
 			local function processNode( xml )
@@ -2238,6 +2276,9 @@ function createProgram( options )
 				if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end end
 				local node = xmlCallbacks[xml.label]( args )
 				if not node or type( node ) ~= "table" then error("Invalid callback response for "..tostring( xml.label ).." creation, response: "..tostring( node )) end
+				for key, func in ipairs( nodeRequiredMethods ) do
+					if not node[func] then error("Node ("..xml.label..") missing function: "..func..", check DynaCode Developer Assistance for more information") end
+				end
 				node:setScene( new )
 				if node.getContains and type(node.getContains) == "function" and node.getContains() then
 					node:handleXML( xml )
@@ -2273,9 +2314,11 @@ function createProgram( options )
 		end
 		local function removeFromController( sName )
 			private.controller[sName] = nil
+			reorderTabIndex()
 		end
 		local function addToController( sName, fnFunction )
 			private.controller[sName] = fnFunction
+			reorderTabIndex()
 		end
 
 		function new.runFromController( name, ... )
@@ -2298,12 +2341,14 @@ function createProgram( options )
 
 		function new.replaceWithFile( self, path )
 			private.nodes = getXML( path )
+			reorderTabIndex()
 		end
 		function new.appendFromFile( self, path )
 			local nodes = getXML( path )
 			for key, node in ipairs( nodes ) do
 				table.insert( private.nodes, node )
 			end
+			reorderTabIndex()
 		end
 
 		function new.getRedrawStatus( self )
@@ -2351,6 +2396,7 @@ function createProgram( options )
 			return private.nodeFocus
 		end
 
+		reorderTabIndex()
 		registryUpdate( new )
 		return new
 	end
@@ -2458,8 +2504,7 @@ function createProgram( options )
 			return settings.scene
 		end
 
-		function new.setX( self, v ) settings.x = v end
-		function new.setY( self, v ) settings.y = v end
+		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
 		function new.getPos( self ) return settings.x, settings.y end --relative to scene canvas (and stage too)
 
@@ -2589,8 +2634,7 @@ function createProgram( options )
 			return settings.scene
 		end
 
-		function new.setX( self, v ) settings.x = v end
-		function new.setY( self, v ) settings.y = v end
+		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
 		function new.getPos( self ) return settings.x, settings.y end --relative to scene canvas (and stage too)
 
@@ -2637,7 +2681,8 @@ function createProgram( options )
 			["width"] = "number",
 			["focused"] = "boolean",
 			["enabled"] = "boolean",
-			["visible"] = "boolean"
+			["visible"] = "boolean",
+			["tabIndex"] = "number"
 		}, cfg)
 		local inputDefaults = {
 			x = 1,
@@ -2655,7 +2700,8 @@ function createProgram( options )
 			onCharPressed = false,
 			onFocus = false,
 			onBlur = false,
-			name = false
+			name = false,
+			tabIndex = 1
 		}
 		local new, private, settings = {}, { scene = false, position = 0 }, {}
 		setmetatable( cfg, {__index=inputDefaults})
@@ -2723,8 +2769,7 @@ function createProgram( options )
 		end
 
 		function new.getPos() return settings.x, settings.y end
-		function new.setX() end
-		function new.setY() end
+		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
 		function new.getHeight() return 1 end
 		function new.getWidth() return settings.width end
@@ -2838,6 +2883,11 @@ function createProgram( options )
 		function new.getBlurCallback( self ) 
 			return getCallback( "blur" )
 		end
+
+		function new.getTabIndex() return settings.tabIndex end
+
+		function new.blur() end
+		function new.focus() end
 
 		return new
 	end
