@@ -771,11 +771,12 @@ function createProgram( options )
 	}, 
 	["label"] = {
 		"x", "y"
+	},
+	["pane"] = {
+		"x", "y"
 	}}
 	local animationTimers = {}
 	function clone.createAnimation( sName, target, mode, setting, newValue, duration )
-		-- the animation must contain its current progress in the animation. This is a frame basis. The duration of the timer is linked to the duration and the difference of the values
-
 		if type( target ) ~= "table"
 		or type( sName ) ~= "string"
 		or type( mode ) ~= "string"
@@ -882,7 +883,7 @@ function createProgram( options )
 						error("Types not same. AnimationProperty from target and newValue should be the same type")
 					end
 				else private.running = false end
-			end
+			else private.running = false end
 		end
 
 		function new.getName() return sName end
@@ -2007,8 +2008,8 @@ function createProgram( options )
 						if node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, settings.name ) elseif settings.scene.getNodeFocus() == node then node:checkEvent( event, settings.name ) end
 						if node.getCursorBlink and node.getCursorBlink() then
 							--term.setCursorBlink( true )
-							local nX, nY = node.getCursorPos()
-							term.setCursorPos( settings.x + nX - 1, settings.y + nY )
+							--local nX, nY = node.getCursorPos()
+							--term.setCursorPos( settings.x + nX - 1, settings.y + nY )
 						end
 					end
 				end
@@ -2080,7 +2081,35 @@ function createProgram( options )
 
 	end
 
+	local function getTotalOffset( node )
+		-- get the nodes parent, add the x and y of the offset to the total and increment the level.
+		--if node.getParent then
+			local x, y, i, last = 0, 0, 0, false
+			last = node:getParent()
+			if last and last.getPos then
+				while true do
+					local nX, nY = last:getPos()
+					x = x + nX
+					y = y + nY
+					i = i + 1
+					if last.getParent and last:getParent() then
+						last = last:getParent()
+					else
+						break
+					end
+				end
+			end
+		--end
+		return x, y, i, last
+	end
+
 	function clone.createPane( cfg )
+		cfg = convertOptions({
+			["x"] = "number",
+			["y"] = "number",
+			["width"] = "number",
+			["height"] = "number"
+		}, cfg)
 		local xmlCallbacks = {
 			["button"] = clone.createButton,
 			["label"] = clone.createLabel,
@@ -2126,9 +2155,11 @@ function createProgram( options )
 					if xmlCallbacks[xml.label] then
 						local node = xmlCallbacks[xml.label]( xml.xarg )
 						node:setScene( private.scene )
+						node:setParent( self )
 						if node.getContains and type( node.getContains ) == "function" and node.getContains() then
 							node:handleXML( xml )
 						end
+						table.insert( private.nodes, node )
 					else error("Unknown node: "..xml.label) end
 				else log( key, "e" ) end
 			end
@@ -2141,25 +2172,31 @@ function createProgram( options )
 		function new.clearNodes( self ) end
 		function new.getNodes( self ) end
 
-		function new.setScene( self, v ) end
-		function new.getScene( self ) end
+		function new.setScene( self, v ) private.scene = v end
+		function new.getScene( self ) return private.scene end
 
-		function new.getAnimationProperty( self, v ) end
-		function new.setAnimationProperty( self, v ) end
+		function new.setParent( self, v ) private.parent = v end
+		function new.getParent() return private.parent end
 
 		function new.drawToTable(tBuffer, nWidth, nHeight, nOffset, sStage)
-			for y = 1, settings.height do
-				if y > nHeight then break end
-				for x = 1, settings.width do
-					if x <= nWidth then
-						tBuffer[y][x] = { char = " ", backgroundColor = settings.backgroundColor, textColor = settings.textColor, nDefined = true }
-					end
-				end
-			end
 			--Draw the contained nodes (and the background color of the pane)
+			local nBuffer = {}
+			for y = 1, nHeight do nBuffer[y] = {} for x = 1, nWidth do nBuffer[y][x] = {} end end
 			for i = 1, #private.nodes do
 				local node = private.nodes[i]
-				if node.drawToTable then node.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage ) end
+				if node.drawToTable then node.drawToTable( nBuffer, nWidth, nHeight, nOffset, sStage ) end
+			end
+			for y = 1, settings.height do
+				if y + settings.y - 1 > nHeight then break end
+				for x = 1, settings.width do
+					if x + settings.x - 1 <= nWidth then
+						if nBuffer[y] and nBuffer[y][x] and nBuffer[y][x].nDefined then
+							tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = nBuffer[y][x].char, backgroundColor = nBuffer[y][x].backgroundColor, textColor = nBuffer[y][x].textColor, nDefined = true }
+						else
+							tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = " ", backgroundColor = settings.backgroundColor, textColor = settings.textColor, nDefined = true }
+						end
+					end
+				end
 			end
 		end
 		function new.getWidth( self ) return settings.width end
@@ -2167,11 +2204,55 @@ function createProgram( options )
 		function new.getPos( self, v ) return settings.x, settings.y end
 		function new.setPos( self, nX, nY ) settings.x, settings.y = nX, nY end
 
-		function new.checkEvent( self )
-
+		function new.checkEvent( self, event, stage )
+			local s = registryFetch( stage )
+			if event[1] == "mouse_click" and event[2] == 1 then
+				log("checkEvent caught "..tostring( stage ))
+				for key, value in ipairs( private.nodes ) do
+					log(key..". "..tostring(value:getName()))
+				end
+				log( "Pane HIT "..tostring( self:getName() ) )
+				for key, node in ipairs( private.nodes ) do
+					if node.getContains and node.getContains() then
+						log("containing node found: "..tostring( node:getName() ))
+						node:checkEvent( event, stage )
+					else
+						log("Checking node in "..tostring( self:getName() )..", "..tostring( node:getName() ))
+						local xOffset, yOffset, amount, last = getTotalOffset( node )
+						local nX, nY = node.getPos()
+						local nHeight, nWidth = node.getHeight(), node.getWidth()
+						local sX, sY = s.getPos()
+						local x = event[3] - sX - xOffset + amount + 1
+						local y = event[4] - sY - yOffset + amount
+						if s.getBorderless() then y = y - 1 end
+						if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
+							--error( node:getName() )
+							node:checkEvent( event, stage )
+						elseif node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, stage ) end
+						--end
+					end
+				end
+			else
+				for key, node in ipairs( private.nodes ) do
+					node:checkEvent( event, stage )
+				end
+			end
 		end -- pass the event to nodes that were subject to the change.
 
 		function new.getContains() return true end
+		function new.sendAllEvents() return true end
+
+		function new.getName() return settings.name end
+		function new.getType() return "pane" end
+
+		function new.getAnimationProperty( property )
+			if settings[property] then return settings[property] else error("Cannot find: "..tostring( property ) .. " on pane", 2) end
+		end
+
+		function new.setAnimationProperty( target, setting, value )
+			if settings[setting] then settings[setting] = value else error(setting.." not found in pane object") end
+			(private.scene):setRedrawStatus( true )
+		end
 
 		return new
 	end
@@ -2192,7 +2273,8 @@ function createProgram( options )
 			"setScene",
 			"checkEvent",
 			"getHeight",
-			"getWidth"
+			"getWidth",
+			"setParent"
 		}
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your scene.")
 		local sceneDefault = {}
@@ -2286,6 +2368,7 @@ function createProgram( options )
 					if not node[func] then error("Node ("..xml.label..") missing function: "..func..", check DynaCode Developer Assistance for more information") end
 				end
 				node:setScene( new )
+				node:setParent( self )
 				if node.getContains and type(node.getContains) == "function" and node.getContains() then
 					node:handleXML( xml )
 				end
@@ -2519,6 +2602,9 @@ function createProgram( options )
 			return settings.scene
 		end
 
+		function new.setParent( self, v ) settings.parent = v end
+		function new.getParent() return private.parent end
+
 		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
 		function new.getPos( self ) return settings.x, settings.y end --relative to scene canvas (and stage too)
@@ -2648,6 +2734,9 @@ function createProgram( options )
 		function new.getScene( self )
 			return settings.scene
 		end
+
+		function new.setParent( self, v ) settings.parent = v end
+		function new.getParent() return private.parent end
 
 		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
@@ -2799,14 +2888,24 @@ function createProgram( options )
 		function new.setTyped() end
 
 		function new.setScene( self, scene ) private.scene = scene end
+		function new.setParent( self, v ) settings.parent = v end
+		function new.getParent() return settings.parent end
 
 		function new.checkEvent( self, event, stage )
 			local stage = assert( registryFetch( stage ), "Invalid stage: "..stage)
 			if event[1] == "mouse_click" then
 				if event[2] == 1 then
+
+					local xOffset, yOffset, amount, last = getTotalOffset( self )
+
 					local sX, sY = stage.getPos()
-					local x, y = event[3] - sX + 1, event[4] - sY + 1
-					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y + (function() if stage.getBorderless() then return 0 else return 1 end end)() then
+
+					local x = event[3] - sX - xOffset + amount + 1
+					local y = event[4] - sY - yOffset + amount
+
+
+					--local x, y = event[3] - sX - xOffset + 1, event[4] - yOffset - sY + 1
+					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y then
 						if private.scene then
 							--# Add focus
 							runCallback( self, "focus", event )
@@ -2816,14 +2915,16 @@ function createProgram( options )
 							stage:setRedrawStatus( true )
 							stage:getScene():setRedrawStatus( true )
 						else error("Scene object not found") end
-					else
-						--# Remove focus
-						runCallback( self, "blur", event )
-						settings.focused = false
-						stage:getScene():setTabIndex( self )
-						private.scene:setNodeFocus( false )
-						stage:setRedrawStatus( true )
-						stage:getScene():setRedrawStatus( true )
+					elseif settings.focused then
+						--error( x .. ", " .. y .. ", " .. settings.x .. ", " .. settings.y )
+						if private.scene then--# Remove focus
+							runCallback( self, "blur", event )
+							settings.focused = false
+							stage:getScene():setTabIndex( self )
+							private.scene:setNodeFocus( false )
+							stage:setRedrawStatus( true )
+							stage:getScene():setRedrawStatus( true )
+						else error("Scene object not found") end
 					end
 				end
 			elseif event[1] == "char" then
@@ -3057,10 +3158,11 @@ function createProgram( options )
 					local node = scene.getNodeFocus()
 					if node then
 						if node.getCursorBlink and node.getCursorBlink() then
+							local xOffset, yOffset, amount, last = getTotalOffset( node )
 							local nX, nY = node.getPos()
 							local sX, sY = aStage.getPos()
 							local nodeCX, nodeCY = node.getCursorPos()
-							term.setCursorPos(nX + sX + nodeCX - 2, nY + sY + nodeCY - (function() if aStage.getBorderless() then return 2 else return 1 end end)())
+							term.setCursorPos(nX + sX + nodeCX - 2 - amount + xOffset, nY + sY + nodeCY + yOffset - amount - (function() if aStage.getBorderless() then return 2 else return 1 end end)())
 							term.setTextColor( aStage.getColor( node.getTextColor() ) )
 							term.setCursorBlink( true )
 							return true

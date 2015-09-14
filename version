@@ -1,7 +1,7 @@
 {
-build = 37,
+build = 40,
 version = 1,
 changes = {
-		"+ Tab Indexing for Inputs (and custom nodes)"
+		"+ Panes"
 	}
 }
