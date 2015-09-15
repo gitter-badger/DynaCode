@@ -1,7 +1,7 @@
 {
-build = 35,
-version = 3,
+build = 42,
+version = 1,
 changes = {
-		"+ Started animations"
+		"* Fixed click detection in panes"
 	}
 }
