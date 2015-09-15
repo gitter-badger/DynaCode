@@ -1,16 +1,7 @@
-<<<<<<< HEAD
 {
 build = 42,
 version = 1,
 changes = {
 		"* Fixed click detection in panes"
 	}
-=======
-{
-build = 40,
-version = 1,
-changes = {
-		"+ Panes"
-	}
->>>>>>> origin/master
 }

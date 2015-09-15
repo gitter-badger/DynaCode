@@ -745,11 +745,6 @@ function createProgram( options )
 			if list[i].getType() == "stage" then
 				if list[i].getBorderless() then offset = 1 else offset = 0 end
 			else offset = 1 end
-<<<<<<< HEAD
-=======
-			log( list[i].getType() )
-			--log(nX .. ", " .. nY .. ", " .. sX .. ", " .. sY, "w")
->>>>>>> origin/master
 			if nX >= sX and nX <= sX + list[i].getWidth() - 1 and nY >= sY and nY <= sY + list[i].getHeight() - offset then
 				return list[i]
 			end
@@ -836,19 +831,11 @@ function createProgram( options )
 				local diff = oV - newValue
 				if diff < 0 then diff = diff * -1 end
 				if diff == 0 then private.interval = duration else
-<<<<<<< HEAD
 					private.interval = duration/diff -- How often we need to change the setting (advance the animation)
 				end
 			elseif type( oV ) == "string" then
 				-- Cannot really animate this, so set the animation interval to the duration.
 				private.interval = duration
-=======
-					private.interval = math.floor( duration/diff ) -- How often we need to change the setting (advance the animation)
-				end
-			elseif type( oV ) == "string" then
-				-- Cannot really animate this, so set the animation interval to the duration.
-				private.interval = math.floor( duration )
->>>>>>> origin/master
 			end
 		end
 
@@ -1052,7 +1039,6 @@ function createProgram( options )
 		return new
 	end
 
-<<<<<<< HEAD
 	local function getTotalOffset( node )
 		local x, y, i, last = 0, 0, 0, false
 		last = node:getParent()
@@ -1073,8 +1059,6 @@ function createProgram( options )
 	end
 
 
-=======
->>>>>>> origin/master
 	function clone.createStage( cfg )
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your stage.")
 		local stageDefaults = {
@@ -1206,11 +1190,7 @@ function createProgram( options )
 			if type( cl ) == "number" or blit then
 				col = convertColor( cl, blit )
 			end
-<<<<<<< HEAD
 			if blit and col then return col end
-=======
-			if blit and col then log("returning "..col) return col end
->>>>>>> origin/master
 			if col then
 				-- now that we have a color, get the color from the filter
 				local c = filter.tbl[col]
@@ -1290,16 +1270,6 @@ function createProgram( options )
 			term.setTextColor( getColor( settings.textColor ) )
 			local bg, tc = true, true
 			for y = startY, endY do
-<<<<<<< HEAD
-=======
-				--[[if term.blit then
-					if y == startY and not settings.borderless then 
-						term.setCursorPos(1, y)
-						--log(getColor(settings.topBarColor, true), "e")
-						term.blit(emptyString, (getColor(settings.textColor, true)):rep(#emptyString), (getColor(settings.topBarColor, true)):rep(#emptyString))
-					end
-				else]]
->>>>>>> origin/master
 				if y == startY and not settings.borderless then
 					term.setBackgroundColor( getColor( settings.topBarColor ) )
 					bg = false
@@ -1406,11 +1376,6 @@ function createProgram( options )
 				if word then
 					text = text:sub( word:len() + 1 )
 					if word:len() > maxWidth then
-<<<<<<< HEAD
-=======
-						log("word: "..word.." is longer than "..maxWidth)
-						--while word:len() > 0 do
->>>>>>> origin/master
 						-- if reached end of line, create new line.
 						if cX > maxWidth then if newLine() then return compiled end end
 						-- we have enough room for this word, separate it into chars and add them to the buffer
@@ -1965,15 +1930,12 @@ function createProgram( options )
 					if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
 						onNode = node
 						break
-<<<<<<< HEAD
 					elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( settings.name ) end
 				end
 				if onNode then
 					for i = #nodes, 1, -1 do
 						local node = nodes[i]
 						if node ~= onNode then if node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( settings.name ) end end
-=======
->>>>>>> origin/master
 					end
 				end
 			end
@@ -2056,7 +2018,6 @@ function createProgram( options )
 					local node = settings.scene.getNodeFocus()
 					node:checkEvent( event )
 				end]]
-<<<<<<< HEAD
 				--[[if settings.scene then
 					for _, node in ipairs( settings.scene.getNodes() ) do
 						if node.sendAllEvents and node.sendAllEvents() then
@@ -2066,18 +2027,6 @@ function createProgram( options )
 						end
 					end
 				end]]
-=======
-				if settings.scene then
-					for _, node in ipairs( settings.scene.getNodes() ) do
-						if node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, settings.name ) elseif settings.scene.getNodeFocus() == node then node:checkEvent( event, settings.name ) end
-						if node.getCursorBlink and node.getCursorBlink() then
-							--term.setCursorBlink( true )
-							--local nX, nY = node.getCursorPos()
-							--term.setCursorPos( settings.x + nX - 1, settings.y + nY )
-						end
-					end
-				end
->>>>>>> origin/master
 
 				if e == "mouse_click" then
 					handleMouseClick( self, event )
@@ -2090,12 +2039,8 @@ function createProgram( options )
 				elseif e == "char" then
 					handleCharPress( self, event )
 				elseif e == "terminate" and settings.allowTerminate then
-<<<<<<< HEAD
 					if runningProgram then terminate()
 					else close() end
-=======
-					terminate()
->>>>>>> origin/master
 				end
 			elseif dialog and settings.active and e == "mouse_click" then
 				local dX, dY = dialog.getPos()
@@ -2151,31 +2096,6 @@ function createProgram( options )
 
 	end
 
-<<<<<<< HEAD
-=======
-	local function getTotalOffset( node )
-		-- get the nodes parent, add the x and y of the offset to the total and increment the level.
-		--if node.getParent then
-			local x, y, i, last = 0, 0, 0, false
-			last = node:getParent()
-			if last and last.getPos then
-				while true do
-					local nX, nY = last:getPos()
-					x = x + nX
-					y = y + nY
-					i = i + 1
-					if last.getParent and last:getParent() then
-						last = last:getParent()
-					else
-						break
-					end
-				end
-			end
-		--end
-		return x, y, i, last
-	end
-
->>>>>>> origin/master
 	function clone.createPane( cfg )
 		cfg = convertOptions({
 			["x"] = "number",
@@ -2221,10 +2141,6 @@ function createProgram( options )
 
 		function new.handleXML( self, content )
 			-- Get the inner nodes, if a node can contain other nodes, add the node and pass it the XML to handle.
-<<<<<<< HEAD
-=======
-			log( "pane: "..textutils.serialize(content) )
->>>>>>> origin/master
 			for key, xml in ipairs( content ) do
 				--# find this panes content (main label is this pane)
 				if key ~= "label" and key ~= "content" and key ~= "xargs" and type( xml ) == "table" then
@@ -2237,26 +2153,18 @@ function createProgram( options )
 						end
 						table.insert( private.nodes, node )
 					else error("Unknown node: "..xml.label) end
-<<<<<<< HEAD
 				end
-=======
-				else log( key, "e" ) end
->>>>>>> origin/master
 			end
 		end
 
 		-- Needs methods for adding, removing and getting nodes from within
 		function new.addNode( self, v ) error( v ) end
 		function new.removeNode( self, v ) end
-<<<<<<< HEAD
 		function new.getNode( self, v )
 			for i, node in ipairs( private.nodes ) do
 				if node:getName() == v then return node end
 			end
 		end
-=======
-		function new.getNode( self, v ) end
->>>>>>> origin/master
 		function new.clearNodes( self ) end
 		function new.getNodes( self ) end
 
@@ -2295,24 +2203,10 @@ function createProgram( options )
 		function new.checkEvent( self, event, stage )
 			local s = registryFetch( stage )
 			if event[1] == "mouse_click" and event[2] == 1 then
-<<<<<<< HEAD
 				for key, node in ipairs( private.nodes ) do
 					if node.getContains and node.getContains() then
 						node:checkEvent( event, stage )
 					else
-=======
-				log("checkEvent caught "..tostring( stage ))
-				for key, value in ipairs( private.nodes ) do
-					log(key..". "..tostring(value:getName()))
-				end
-				log( "Pane HIT "..tostring( self:getName() ) )
-				for key, node in ipairs( private.nodes ) do
-					if node.getContains and node.getContains() then
-						log("containing node found: "..tostring( node:getName() ))
-						node:checkEvent( event, stage )
-					else
-						log("Checking node in "..tostring( self:getName() )..", "..tostring( node:getName() ))
->>>>>>> origin/master
 						local xOffset, yOffset, amount, last = getTotalOffset( node )
 						local nX, nY = node.getPos()
 						local nHeight, nWidth = node.getHeight(), node.getWidth()
@@ -2320,18 +2214,10 @@ function createProgram( options )
 						local x = event[3] - sX - xOffset + amount + 1
 						local y = event[4] - sY - yOffset + amount
 						if s.getBorderless() then y = y - 1 end
-<<<<<<< HEAD
 						
 						if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
 							node:checkEvent( event, stage )
 						elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( stage ) end
-=======
-						if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
-							--error( node:getName() )
-							node:checkEvent( event, stage )
-						elseif node.sendAllEvents and node.sendAllEvents() then node:checkEvent( event, stage ) end
-						--end
->>>>>>> origin/master
 					end
 				end
 			else
@@ -2425,12 +2311,6 @@ function createProgram( options )
 				end
 			end
 			table.sort( private.tabOrder, function( a, b ) return a.getTabIndex() < b.getTabIndex() end )
-<<<<<<< HEAD
-=======
-			for key, value in ipairs( private.tabOrder ) do
-				log( key..". " .. tostring( value:getName() ) )
-			end
->>>>>>> origin/master
 		end
 		local function nextTabIndex( stage )
 			reorderTabIndex()
@@ -2447,11 +2327,7 @@ function createProgram( options )
 			end
 		end
 		local function setTabIndex( node )
-<<<<<<< HEAD
 			-- find the node in the tabOrder and set the tabIndex to its key.
-=======
-			-- find the node in the tabOrder and set the tabindex to its key.
->>>>>>> origin/master
 			reorderTabIndex()
 			for _, n in ipairs( private.tabOrder ) do
 				if n == node then
@@ -2489,19 +2365,11 @@ function createProgram( options )
 				local content = f.readAll()
 				f.close()
 				content = XMLStringToTable( content )
-<<<<<<< HEAD
-=======
-				log( textutils.serialize( content ) )
->>>>>>> origin/master
 				if #content <= 0 then return false else
 					-- check if an XML tag (label) is valid.
 					local nodes = {}
 					for key, xml in pairs( content ) do
 						local valid = false
-<<<<<<< HEAD
-=======
-						log(xml.label)
->>>>>>> origin/master
 						if not xmlCallbacks[xml.label] then error("Unknown node: "..xml.label) else
 							table.insert( nodes, processNode(xml) )
 						end
@@ -2606,15 +2474,11 @@ function createProgram( options )
 		end
 
 		function new.checkEvent( self, event, stage )
-<<<<<<< HEAD
 			if event[1] == "key" and event[2] == keys.tab then nextTabIndex( stage ) elseif event[1] ~= "mouse_click" then
 				for key, node in ipairs( private.nodes ) do
 					node:checkEvent( event, stage )
 				end
 			end
-=======
-			if event[1] == "key" and event[2] == keys.tab then nextTabIndex( stage ) end
->>>>>>> origin/master
 		end
 
 		reorderTabIndex()
@@ -2726,11 +2590,7 @@ function createProgram( options )
 		end
 
 		function new.setParent( self, v ) settings.parent = v end
-<<<<<<< HEAD
 		function new.getParent() return settings.parent end
-=======
-		function new.getParent() return private.parent end
->>>>>>> origin/master
 
 		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
@@ -3030,30 +2890,17 @@ function createProgram( options )
 					local x = event[3] - sX - xOffset + amount + 1
 					local y = event[4] - sY - yOffset + amount
 
-<<<<<<< HEAD
-=======
-
-					--local x, y = event[3] - sX - xOffset + 1, event[4] - yOffset - sY + 1
->>>>>>> origin/master
 					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y then
 						if private.scene then
 							--# Add focus
 							runCallback( self, "focus", event )
 							settings.focused = true
 							stage:getScene():setTabIndex( self )
-<<<<<<< HEAD
 							stage:getScene():setNodeFocus( self )
 							stage:setRedrawStatus( true )
 							stage:getScene():setRedrawStatus( true )
 						else error("Scene object not found") end
 					else
-=======
-							private.scene:setNodeFocus( self )
-							stage:setRedrawStatus( true )
-							stage:getScene():setRedrawStatus( true )
-						else error("Scene object not found") end
-					elseif settings.focused then
->>>>>>> origin/master
 						--error( x .. ", " .. y .. ", " .. settings.x .. ", " .. settings.y )
 						if private.scene then--# Remove focus
 							runCallback( self, "blur", event )
@@ -3102,11 +2949,7 @@ function createProgram( options )
 			end
 		end
 
-<<<<<<< HEAD
 		function new.blurWhenNotClicked() return true end
-=======
-		function new.sendAllEvents() return true end
->>>>>>> origin/master
 
 		function new.getCursorBlink() return ( settings.focused and private.position < settings.width and true ) or false end
 		function new.getCursorPos() return private.position + 1, 1 end
@@ -3158,11 +3001,7 @@ function createProgram( options )
 			local stage = assert( registryFetch( stage ), "Invalid stage: "..stage)
 			runCallback( self, "blur", event )
 			settings.focused = false
-<<<<<<< HEAD
 			if private.scene.getNodeFocus() == self then private.scene:setNodeFocus( false ) end
-=======
-			private.scene:setNodeFocus( false )
->>>>>>> origin/master
 			stage:setRedrawStatus( true )
 			stage:getScene():setRedrawStatus( true )
 			--stage:getScene():setTabIndex( self )
@@ -3297,11 +3136,7 @@ function createProgram( options )
 				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then drawAll() end
 
 				local function cbSet( aStage, scene )
-<<<<<<< HEAD
 
-=======
-					log("cbSet", "e")
->>>>>>> origin/master
 				end
 
 				local function nodeSet( aStage, scene )
@@ -3376,7 +3211,6 @@ function createProgram( options )
 		return processEvent( event, id )
 	end
 
-<<<<<<< HEAD
 	function clone.setErrorCallback( cb )
 		program.customErrorCB = cb
 	end
@@ -3390,21 +3224,6 @@ function createProgram( options )
 	end
 
 	function clone.setCatchErrors( v )
-=======
-	clone.setErrorCallback = function( cb )
-		program.customErrorCB = cb
-	end
-
-	clone.getErrorCallback = function()
-		return program.customErrorCB
-	end
-
-	clone.getCatchErrors = function()
-		return program.catchErrors
-	end
-
-	clone.setCatchErrors = function( v )
->>>>>>> origin/master
 		program.catchErrors = v
 	end
 
