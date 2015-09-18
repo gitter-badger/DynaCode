@@ -1,7 +1,7 @@
 {
-build = 44,
+build = 48,
 version = 1,
 changes = {
-		"* Reduced calls to getColor, input lag reduced."
+		"* Allowed panes to be set at negative Y ordinate"
 	}
 }

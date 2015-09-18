@@ -2031,8 +2031,16 @@ function createProgram( options )
 		end
 
 		local function handleKeyPress( self, event )
-			if settings.scene.getNodeFocus() then
+			if settings.scene and settings.scene.getNodeFocus() then
 				settings.scene.getNodeFocus():checkEvent( event, settings.name )
+			end
+		end
+
+		local function handleMouseUp( self, event )
+			if settings.scene then
+				for _, node in ipairs( settings.scene:getNodes() ) do
+					node:checkEvent( event, settings.name )
+				end
 			end
 		end
 
@@ -2058,6 +2066,8 @@ function createProgram( options )
 					handleMouseScroll( self, event )
 				elseif e == "mouse_drag" then
 					handleMouseDrag( self, event )
+				elseif e == "mouse_up" then
+					handleMouseUp( self, event )
 				elseif e == "key" then
 					handleKeyPress( self, event )
 				elseif e == "char" then
@@ -2147,7 +2157,9 @@ function createProgram( options )
 			["y"] = "number",
 			["width"] = "number",
 			["height"] = "number",
-			["enabled"] = "boolean"
+			["enabled"] = "boolean",
+			["overflowX"] = "boolean",
+			["overflowY"] = "boolean"
 		}, cfg)
 		local xmlCallbacks = {
 			["button"] = clone.createButton,
@@ -2155,7 +2167,6 @@ function createProgram( options )
 			["pane"] = clone.createPane,
 			["input"] = clone.createInput
 		}
-		--cfg = convertOptions( {}, cfg )
 		--[[
 			A pane can contain nodes, a pane is itself a node and should be added to a scene. Any nodes within the pane are drawn relative to the panes position
 			allowing one to animate the pane, resulting in its contents moving as well.
@@ -2170,7 +2181,7 @@ function createProgram( options )
 		local paneDefaults = {
 			width = 10,
 			height = 5,
-			backgroundColor = "red",
+			backgroundColor = "white",
 			textColor = "black",
 			x = 1,
 			y = 1,
@@ -2254,7 +2265,15 @@ function createProgram( options )
 		function new.getParent() return private.parent end
 
 		function new.drawToTable(tBuffer, nWidth, nHeight, nOffset, sStage)
-			--Draw the contained nodes (and the background color of the pane)
+			
+			-- overflowX? If so, is the content out of bounds?
+			if settings.overflowX then
+
+			end
+			if settings.overflowY then
+
+			end
+
 			local nBuffer = {}
 			for y = 1, nHeight do nBuffer[y] = {} for x = 1, nWidth do nBuffer[y][x] = {} end end
 			for i = 1, #private.nodes do
@@ -2262,13 +2281,15 @@ function createProgram( options )
 				if node.drawToTable then node.drawToTable( nBuffer, nWidth, nHeight, nOffset, sStage ) end
 			end
 			for y = 1, settings.height do
-				if y + settings.y - 1 > nHeight then break end
-				for x = 1, settings.width do
-					if x + settings.x - 1 <= nWidth then
-						if nBuffer[y] and nBuffer[y][x] and nBuffer[y][x].nDefined then
-							tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = nBuffer[y][x].char, backgroundColor = nBuffer[y][x].backgroundColor, textColor = nBuffer[y][x].textColor, nDefined = true }
-						else
-							tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = " ", backgroundColor = settings.backgroundColor, textColor = settings.textColor, nDefined = true }
+				if y + settings.y - 1 > nHeight then break
+				elseif y + settings.y - 1 > 0 then
+					for x = 1, settings.width do
+						if x + settings.x - 1 <= nWidth then
+							if nBuffer[y] and nBuffer[y][x] and nBuffer[y][x].nDefined then
+								tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = nBuffer[y][x].char, backgroundColor = nBuffer[y][x].backgroundColor, textColor = nBuffer[y][x].textColor, nDefined = true }
+							else
+								tBuffer[settings.y + y - 1][x + settings.x - 1] = { char = " ", backgroundColor = settings.backgroundColor, textColor = settings.textColor, nDefined = true }
+							end
 						end
 					end
 				end
@@ -2282,24 +2303,26 @@ function createProgram( options )
 
 		function new.checkEvent( self, event, stage )
 			local s = registryFetch( stage )
-			if event[1] == "mouse_click" and event[2] == 1 then
-				for key, node in ipairs( private.nodes ) do
-					if node.getContains and node.getContains() then
-						node:checkEvent( event, stage )
-					else
-						local xOffset, yOffset, amount, last = getTotalOffset( node )
-						local nX, nY = node.getPos()
-						local nHeight, nWidth = node.getHeight(), node.getWidth()
-						local sX, sY = s.getPos()
-						local x = event[3] - sX - xOffset + amount + 1
-						local y = event[4] - sY - yOffset + amount
-						if s.getBorderless() then y = y + 1 end
-						
-						if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
+			if event[1] == "mouse_click" then
+				--if event[2] == 1 then
+					for key, node in ipairs( private.nodes ) do
+						if node.getContains and node.getContains() then
 							node:checkEvent( event, stage )
-						elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( stage ) end
+						else
+							local xOffset, yOffset, amount, last = getTotalOffset( node )
+							local nX, nY = node.getPos()
+							local nHeight, nWidth = node.getHeight(), node.getWidth()
+							local sX, sY = s.getPos()
+							local x = event[3] - sX - xOffset + amount + 1
+							local y = event[4] - sY - yOffset + amount
+							if s.getBorderless() then y = y + 1 end
+							
+							if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
+								node:checkEvent( event, stage )
+							elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( stage ) end
+						end
 					end
-				end
+				--end
 			else
 				for key, node in ipairs( private.nodes ) do
 					node:checkEvent( event, stage )
@@ -2466,7 +2489,7 @@ function createProgram( options )
 			for y = 1, stage:getHeight() do buffer[y] = {} for x = 1, stage:getWidth() do buffer[y][x] = {} end end
 			-- Request a node for an update. Each node will return either a new or previous buffer
 			for _, node in pairs( private.nodes ) do
-				node.drawToTable( buffer, stage:getWidth(), stage:getHeight(), 0, stageName )
+				node.drawToTable( buffer, stage:getWidth(), stage:getHeight(), 1, stageName )
 			end
 			return buffer
 		end
@@ -2598,7 +2621,8 @@ function createProgram( options )
 			["toggleable"] = "boolean",
 			["text"] = "string",
 			["toggleState"] = "boolean",
-			["toggleText"] = "string"
+			["toggleText"] = "string",
+			["padding"] = "number"
 		}, cfg)
 		validateRequirements({}, cfg)
 		-- returns a new object
@@ -2606,7 +2630,7 @@ function createProgram( options )
 			x = 1,
 			y = 1,
 			width = "auto",
-			padding = 1,
+			padding = 0,
 			height = 1,
 			maxWidth = 20,
 			backgroundColor = "white",
@@ -2619,6 +2643,8 @@ function createProgram( options )
 			toggleText = "toggled button",
 			toggleTextColor = "white",
 			toggledBackgroundColor = "lightGray",
+			activeTextColor = "lightGray",
+			activeBackgroundColor = "gray",
 			onClick = false,
 			name = false
 		}
@@ -2626,6 +2652,7 @@ function createProgram( options )
 		setmetatable(settings, {__index=cfg})
 		setmetatable(cfg, {__index=buttonDefaults})
 		local needsRedraw = false
+		local active = false
 
 		local function getWidth()
 			if settings.width == "auto" then
@@ -2652,8 +2679,8 @@ function createProgram( options )
 			local textY, textX
 			-- If the height of the button is greater than 1, calculate the Y at which the text will be drawn
 			if settings.height > 1 then
-				textY = math.floor( settings.height/2 ) + nOffset
-				if util.getBorderless() then textY = textY + 1 end
+				textY = math.floor( settings.height/2 ) + 1
+				--if util.getBorderless() then textY = textY + 1 end
 			else
 				textY = 1
 			end
@@ -2663,7 +2690,12 @@ function createProgram( options )
 				tText[cIndex] = (settings.text):sub(cIndex, cIndex)
 			end
 
-			local tc, bg = util.getColor( settings.textColor ), util.getColor( settings.backgroundColor )
+			local tc, bg
+			if active then
+				tc, bg = util.getColor( settings.activeTextColor ), util.getColor( settings.activeBackgroundColor )
+			else
+				tc, bg = util.getColor( settings.textColor ), util.getColor( settings.backgroundColor )
+			end
 
 			for y = 1, settings.height do
 				if y + settings.y - 1 - nOffset < nHeight then
@@ -2745,7 +2777,7 @@ function createProgram( options )
 
 		function new.checkEvent( self, event, stage )
 			if event[1] == "mouse_click" then
-				needsRedraw = true
+				active = true
 				if type( settings.onClick ) == "function" then
 					settings.onClick( self )
 				elseif type( settings.onClick ) == "string" then
@@ -2753,7 +2785,7 @@ function createProgram( options )
 						settings.scene.runFromController( ( settings.onClick ):sub(2), self )
 					end
 				end
-			end
+			elseif event[1] == "mouse_up" then active = false end
 		end
 
 		function new.getName() return settings.name end
