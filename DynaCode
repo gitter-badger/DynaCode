@@ -180,7 +180,7 @@ function installVersionData( rData, silent )
 	if apiCfg.resetScreenPost and not silent then sleep(apiCfg.clearDelay) clear() end
 end
 
-local function getVersion()
+function getVersion()
 	local h = fs.open( apiCfg.versionPath, "r" )
 	if not h then
 		return { version = "Unknown", build = "Unknown" }
@@ -223,24 +223,7 @@ local function attemptInstall()
 	else
 		print("No files are required")
 	end
-end
-
-local h = fs.open( apiCfg.versionPath, "r" )
-if h then
-	local r = h.readAll()
-	h.close()
-	if not r then
-		attemptInstall()
-	elseif r then
-		r = textutils.unserialize( r )
-		if not r then
-			attemptInstall()
-		elseif r then
-			_G._DYNACODE = r
-		end
-	end
-else
-	attemptInstall()
+	apiCfg.output = old
 end
 
 local function copy(obj)
@@ -394,12 +377,34 @@ end
 
 function createProgram( options )
 	validateRequirements({ "name" }, options, false, "Missing requirements to initialize program:\n", "\nPlease define the above settings when creating your program instance")
-	if not updateChecked and apiCfg.keepUpToDate then
-		-- check for updates now
-		checkAndProceed()
-		updateChecked = true
-	end
+	if not updateChecked then
 
+		local h = fs.open( apiCfg.versionPath, "r" )
+		if h then
+			local r = h.readAll()
+			h.close()
+			if not r then
+				attemptInstall()
+			elseif r then
+				r = textutils.unserialize( r )
+				if not r then
+					attemptInstall()
+				elseif r then
+					_G._DYNACODE = r
+				end
+			end
+		else
+			attemptInstall()
+		end
+
+		if apiCfg.keepUpToDate then
+			-- check for updates now
+			checkAndProceed()
+			updateChecked = true
+		end
+
+	end
+	
 	local termX, termY = term.getSize()
 
 	local defaults = { backgroundColor = colors.black, debug = true, debugWait = 0.5, debugPauseOnException = true, catchErrors = true, customErrorCB = false, restartTimer = 10 }
@@ -619,7 +624,7 @@ function createProgram( options )
 		for y = 1, termY do
 			merged[y] = {}
 			for x = 1, termX do
-				merged[y][x] = { defined = false, char = " ", textColor = colors.white, backgroundColor = colors.black }
+				merged[y][x] = { defined = false, char = " ", textColor = colors.white, backgroundColor = program.backgroundColor }
 			end
 			-- create the Y template so the below function can index the merged table
 		end
@@ -665,9 +670,8 @@ function createProgram( options )
 	end
 
 	local function drawMerge( tMerged )
-		-- compare each entry in here to the old buffer. Only redraw if changed.
+		-- Compare each entry in here to the old buffer. Only redraw if changed.
 		-- Draw the table passed (should be size of entire terminal)
-		--term.setCursorBlink( false )
 		local oX, oY = term.getCursorPos()
 		local oBuffer = objects.buffer
 		local oTC, oBG = colors.white, colors.black
@@ -700,7 +704,6 @@ function createProgram( options )
 		end
 		objects.buffer = copy( oBuffer )
 		term.setCursorPos( oX, oY )
-		--term.setCursorBlink( true )
 	end
 
 	local function drawAll()
@@ -737,7 +740,7 @@ function createProgram( options )
 
 		table.sort(list, function( a, b ) return a.getBufferLevel() > b.getBufferLevel() end)
 
-		--[[ Compile a list of windows and dialogs.]]
+		--[[ Compile a list of windows and dialogs ]]
 
 		for i = #list, 1, -1 do
 			local sX, sY = list[i].getPos()
@@ -763,25 +766,29 @@ function createProgram( options )
 	local validAnimationTargets = { 
 	["stage"] = {
 		"x", "y", "width", "height"
-	}, 
+	},
 	["button"] = {
 		"x", "y", "width", "height"
-	}, 
+	},
 	["label"] = {
 		"x", "y"
 	},
 	["pane"] = {
 		"x", "y"
+	},
+	["input"] = {
+		"x", "y"
 	}}
 	local animationTimers = {}
-	function clone.createAnimation( sName, target, mode, setting, newValue, duration )
+	function clone.createAnimation( sName, target, mode, setting, newValue, interval, step )
 		if type( target ) ~= "table"
 		or type( sName ) ~= "string"
 		or type( mode ) ~= "string"
 		or type( setting ) ~= "string"
 		or type( newValue ) == "nil"
-		or type( duration ) ~= "number" then
-			error("Expected string, table, string, string, ANY, number", 2)
+		or type( interval ) ~= "number"
+		or type( step ) ~= "number" then
+			error("Expected string, table, string, string, new var, number, number", 2)
 		end
 
 		if type( target.getType ) ~= "function" then error("Invalid target. getType method not found") end
@@ -840,7 +847,8 @@ function createProgram( options )
 		end
 
 		local function setupPrivate()
-			calculateInterval()
+			--calculateInterval()
+			if step < 0 then step = step*-1 end
 		end
 
 		local function updateInitialValue()
@@ -849,15 +857,15 @@ function createProgram( options )
 
 		local function queueTimer( self )
 			-- queue a timer object containing the actual animation ( self )
-			animationTimers[os.startTimer( private.interval )] = {
+			animationTimers[os.startTimer( interval )] = {
 				animation = sName
 			}
 		end
 
 		function new.start( self )
-			calculateInterval()
-			private.running = true
+			--calculateInterval()
 			if target.getAnimationProperty( setting ) ~= newValue then
+				private.running = true
 				queueTimer( self )
 			end
 		end
@@ -870,10 +878,20 @@ function createProgram( options )
 
 		function new.processFrame( self )
 			if target.getAnimationProperty( setting ) ~= newValue and private.running then
-				if target.getAnimationProperty(setting)-newValue < 0 then private.direction = 1 else private.direction = -1 end
-				-- called by DynaCode event manager. Advances the animation by the correct increment.
-				target:setAnimationProperty( setting, target.getAnimationProperty( setting ) + private.direction, private.interval )
-				-- check if the animation is complete.
+				if target.getAnimationProperty(setting)-newValue < 0 then private.direction = step else private.direction = step*-1 end
+				
+				-- if moving down towards new value, then check that moving by direction increment won't overshoot. If it will change it.
+				local am = private.direction
+				if target.getAnimationProperty(setting) - newValue > 0 then
+					-- moving to newValue from infront (newValue is less than current value)
+					if target.getAnimationProperty( setting ) + am < newValue then am = newValue - target.getAnimationProperty( setting ) end
+				else
+					if target.getAnimationProperty( setting ) + am > newValue then am = target.getAnimationProperty( setting ) + newValue end
+				end
+
+				target:setAnimationProperty( setting, target.getAnimationProperty( setting ) + am, private.interval )
+				
+
 				if target.getAnimationProperty( setting ) ~= newValue and private.running then
 					if type( target.getAnimationProperty( setting ) ) == type( newValue ) then
 						queueTimer( self )
@@ -1048,7 +1066,7 @@ function createProgram( options )
 				x = x + nX
 				y = y + nY
 				i = i + 1
-				if last.getParent and last:getParent() then
+				if last.getParent and last:getParent() and last:getParent().getPos then
 					last = last:getParent()
 				else
 					break
@@ -1236,8 +1254,8 @@ function createProgram( options )
 					stageCanvas[stageCanvas.cY][stageCanvas.cX].textColor = ( stageCanvas.textColor )
 					stageCanvas[stageCanvas.cY][stageCanvas.cX].backgroundColor = ( stageCanvas.backgroundColor )
 				else
-					stageCanvas[stageCanvas.cY][stageCanvas.cX].textColor = getColor( stageCanvas.textColor )
-					stageCanvas[stageCanvas.cY][stageCanvas.cX].backgroundColor = getColor( stageCanvas.backgroundColor )
+					stageCanvas[stageCanvas.cY][stageCanvas.cX].textColor = ( stageCanvas.textColor )
+					stageCanvas[stageCanvas.cY][stageCanvas.cX].backgroundColor = ( stageCanvas.backgroundColor )
 				end
 				stageCanvas.cX = stageCanvas.cX + 1
 				if stageCanvas.cX > settings.width then
@@ -1266,19 +1284,21 @@ function createProgram( options )
 
 			local startY, endY = 1, settings.height + 1 + (function() if not settings.borderless then return 1 else return 0 end end)()
 
-			term.setBackgroundColor( getColor( settings.backgroundColor ) )
-			term.setTextColor( getColor( settings.textColor ) )
+			local bgColor, tcColor, topBarColor = getColor( settings.backgroundColor ), getColor( settings.textColor ), getColor( settings.topBarColor )
+
+			term.setBackgroundColor( bgColor )
+			term.setTextColor( tcColor )
 			local bg, tc = true, true
 			for y = startY, endY do
 				if y == startY and not settings.borderless then
-					term.setBackgroundColor( getColor( settings.topBarColor ) )
+					term.setBackgroundColor( topBarColor )
 					bg = false
 				else
 					if not bg then
-						term.setBackgroundColor( getColor( settings.backgroundColor ) )
+						term.setBackgroundColor( bgColor )
 						bg = true
 					end
-					if not tc then term.setTextColor( getColor( settings.textColor ) ) tc = true end
+					if not tc then term.setTextColor( tcColor ) tc = true end
 				end
 				term.setCursorPos(1, y)
 				term.write(emptyString)
@@ -1481,11 +1501,12 @@ function createProgram( options )
 
 		local function setupBuffer( table, offset )
 			local lastX, lastY = 1, 1
+			local tc, bg = getColor( table.textColor ), getColor( table.backgroundColor )
 			for height = 1, settings.height + 1 + offset do
 				table[height] = ( function( height ) if table[height] then return table[height] else return {} end end )( height )
 				lastY = height
 				for width = 1, settings.width + 1 do
-					table[height][width] = ( function( height, width ) if table[height][width] then return table[height][width] else return {char = " ", textColor = getColor( table.textColor ), backgroundColor = getColor( table.backgroundColor ) } end end )( height, width )
+					table[height][width] = ( function( height, width ) if table[height][width] then return table[height][width] else return {char = " ", textColor = tc, backgroundColor = bg } end end )( height, width )
 					lastX = width
 				end
 				for width = lastX, #table[height] do
@@ -1507,27 +1528,37 @@ function createProgram( options )
 		local oMerge, nodeB = {}, {}
 		local function mergeBuffers( over )
 			local offset = (function() if settings.borderless then return 0 else return 1 end end)()
-			if cache.needsRedraw or (settings.scene and settings.scene.getRedrawStatus()) then
-				draw()
-				local b = copy( stageCanvas )
-				local nodes = false
-				if settings.scene and ( settings.scene.getRedrawStatus() or cache.redrawNodes ) then nodes = settings.scene.getNodes() end
-				if nodes then
-					nodeB = copy(b)
-					for key, value in ipairs( nodes ) do
-						if value.drawToTable then value.drawToTable( nodeB, settings.width, settings.height, (function() if settings.borderless then return 0 else return 1 end end)(), settings.name) end
-					end
+
+			-- Get the scene to return a table of information containing the nodes.
+			if cache.needsRedraw or (settings.scene and settings.scene.getRedrawNodes()) or over then
+				if cache.needsRedraw or over then draw() end
+				local b = ( stageCanvas )
+				if settings.scene then
+					nodeB = settings.scene:process( settings.name, over )
 				end
+				local t, bg = getColor( settings.textColor ), getColor( settings.backgroundColor )
+
+				local tcString, bgString = false, false
+				local ot, ob = false, false
+
 				for y = 1, settings.height do
 					for x = 1, settings.width do
 						if nodeB and nodeB[y] and nodeB[y][x] and nodeB[y][x].nDefined then
 							b[y+offset][x].char = nodeB[y][x].char
-							b[y+offset][x].textColor = getColor( nodeB[y][x].textColor )
-							b[y+offset][x].backgroundColor = getColor( nodeB[y][x].backgroundColor )
+							if nodeB[y][x].textColor ~= tcString then tcString = ( nodeB[y][x].textColor ) ot = getColor( tcString ) end
+							if nodeB[y][x].backgroundColor ~= bgString then bgString = ( nodeB[y][x].backgroundColor ) ob = getColor( bgString ) end
+							b[y+offset][x].textColor = ot
+							b[y+offset][x].backgroundColor = ob
 						elseif windowBuffer[y][x].char ~= " " then
 							b[y+offset][x].char = windowBuffer[y][x].char
-							b[y+offset][x].textColor = getColor( windowBuffer[y][x].textColor )
-							b[y+offset][x].backgroundColor = getColor( windowBuffer[y][x].backgroundColor )
+							if windowBuffer[y][x].textColor ~= tcString then tcString = ( windowBuffer[y][x].textColor ) ot = getColor( tcString ) end
+							if windowBuffer[y][x].backgroundColor ~= bgString then bgString = ( windowBuffer[y][x].backgroundColor ) ob = getColor( bgString ) end
+							b[y+offset][x].textColor = ot
+							b[y+offset][x].backgroundColor = ob
+						else
+							b[y+offset][x].char = " "
+							b[y+offset][x].textColor = t
+							b[y+offset][x].backgroundColor = bg
 						end
 					end
 				end
@@ -1535,9 +1566,9 @@ function createProgram( options )
 				if cache.redrawNodes and not over then cache.redrawNodes = false end
 				if settings.scene and settings.scene.getRedrawStatus() and not over then settings.scene:setRedrawStatus( false ) end
 				oMerge = b
-				return copy( oMerge )
+				return oMerge
 			else
-				return copy( oMerge )
+				return oMerge
 			end
 		end
 
@@ -1922,15 +1953,19 @@ function createProgram( options )
 			if settings.scene and type( settings.scene ) == "table" and settings.scene.getType and settings.scene.getType() == "scene" then
 				local nodes = settings.scene.getNodes()
 				for i = #nodes, 1, -1 do
-					local node = nodes[i]
-					local nodeX, nodeY = node.getPos()
-					local nodeW, nodeH = node.getWidth(), node.getHeight()
+					if nodes[i].getContains and nodes[i]:getContains() then
+						nodes[i]:checkEvent( event, settings.name )
+					else
+						local node = nodes[i]
+						local nodeX, nodeY = node.getPos()
+						local nodeW, nodeH = node.getWidth(), node.getHeight()
 
-					local x, y = nX - settings.x + 1, nY - settings.y + 1 - offset
-					if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
-						onNode = node
-						break
-					elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( settings.name ) end
+						local x, y = nX - settings.x + 1, nY - settings.y + 1 - offset
+						if x >= nodeX and x <= nodeX + nodeW - 1 and y >= nodeY and y <= nodeY + nodeH - 1 then
+							onNode = node
+							break
+						elseif node.blur and node.blurWhenNotClicked and node.blurWhenNotClicked() then node:blur( settings.name ) end
+					end
 				end
 				if onNode then
 					for i = #nodes, 1, -1 do
@@ -1995,12 +2030,16 @@ function createProgram( options )
 			end
 		end
 
-		local function handleKeyPress()
-
+		local function handleKeyPress( self, event )
+			if settings.scene.getNodeFocus() then
+				settings.scene.getNodeFocus():checkEvent( event, settings.name )
+			end
 		end
 
-		local function handleCharPress()
-
+		local function handleCharPress( self, event )
+			if settings.scene.getNodeFocus() then
+				settings.scene.getNodeFocus():checkEvent( event, settings.name )
+			end
 		end
 
 		function new.runEvent( self, event )
@@ -2013,21 +2052,6 @@ function createProgram( options )
 				if p1 == settings.name then focus() else blur() end
 			end
 			if not dialog and settings.active then
-
-				--[[if settings.scene and settings.scene.getNodeFocus() then
-					local node = settings.scene.getNodeFocus()
-					node:checkEvent( event )
-				end]]
-				--[[if settings.scene then
-					for _, node in ipairs( settings.scene.getNodes() ) do
-						if node.sendAllEvents and node.sendAllEvents() then
-							node:checkEvent( event, settings.name ) 
-						elseif settings.scene.getNodeFocus() == node then
-							node:checkEvent( event, settings.name ) 
-						end
-					end
-				end]]
-
 				if e == "mouse_click" then
 					handleMouseClick( self, event )
 				elseif e == "mouse_scroll" then
@@ -2091,17 +2115,39 @@ function createProgram( options )
 			if settings[setting] then settings[setting] = value else error(setting.." not found in stage object") end
 		end
 
+		function new.getDisabledFilter( self, stage )
+			if settings.disabledFilter then return settings.disabledFilter else return "_NORMAL" end
+		end
+
 		if settings.visible then queueRedraw() end
 		return new
 
 	end
 
+	local function orderNodeRedraw(  )
+
+	end
+
 	function clone.createPane( cfg )
+
+		local nodeRequiredMethods = {
+			"getPos",
+			"setPos",
+			"drawToTable",
+			"setScene",
+			"checkEvent",
+			"getHeight",
+			"getWidth",
+			"setParent",
+			"getParent"
+		}
+
 		cfg = convertOptions({
 			["x"] = "number",
 			["y"] = "number",
 			["width"] = "number",
-			["height"] = "number"
+			["height"] = "number",
+			["enabled"] = "boolean"
 		}, cfg)
 		local xmlCallbacks = {
 			["button"] = clone.createButton,
@@ -2127,7 +2173,10 @@ function createProgram( options )
 			backgroundColor = "red",
 			textColor = "black",
 			x = 1,
-			y = 1
+			y = 1,
+			filter = false,
+			disabledFilter = false,
+			enabled = true
 		}
 		local settings = {}
 		setmetatable( cfg, {__index=paneDefaults} )
@@ -2145,7 +2194,13 @@ function createProgram( options )
 				--# find this panes content (main label is this pane)
 				if key ~= "label" and key ~= "content" and key ~= "xargs" and type( xml ) == "table" then
 					if xmlCallbacks[xml.label] then
-						local node = xmlCallbacks[xml.label]( xml.xarg )
+						local args = xml.xarg
+						if xml.label == "button" or xml.label == "label" then if xml.content then args.text = xml.content end end
+						local node = xmlCallbacks[xml.label]( args )
+						if not node or type( node ) ~= "table" then error("Invalid callback response for "..tostring( xml.label ).." creation, response: "..tostring( node )) end
+						for key, func in ipairs( nodeRequiredMethods ) do
+							if not node[func] then error("Node ("..xml.label..") missing function: "..func..", check DynaCode Developer Assistance for more information") end
+						end
 						node:setScene( private.scene )
 						node:setParent( self )
 						if node.getContains and type( node.getContains ) == "function" and node.getContains() then
@@ -2155,6 +2210,10 @@ function createProgram( options )
 					else error("Unknown node: "..xml.label) end
 				end
 			end
+		end
+
+		function new.getRedrawNodes()
+			for key, node in ipairs( private.nodes ) do if node.needsRedraw and node.needsRedraw() then return true end end
 		end
 
 		-- Needs methods for adding, removing and getting nodes from within
@@ -2167,6 +2226,26 @@ function createProgram( options )
 		end
 		function new.clearNodes( self ) end
 		function new.getNodes( self ) end
+
+		function new.getEnabled() return settings.enabled end
+		function new.getDisabledFilter( self, stage )
+			if settings.disabledFilter then return settings.disabledFilter else
+				-- return the parents disabled filter.
+				if private.parent then
+					return private.parent:getDisabledFilter( stage )
+				else error("No parent: "..tostring( settings.name )) end
+			end
+		end
+
+		function new.getTotalEnabled()
+			if private.parent then 
+				if settings.enabled then
+					return private.parent:getTotalEnabled() 
+				else
+					return false
+				end
+			else error("No parent: "..tostring( settings.name ) ) end
+		end
 
 		function new.setScene( self, v ) private.scene = v end
 		function new.getScene( self ) return private.scene end
@@ -2195,6 +2274,7 @@ function createProgram( options )
 				end
 			end
 		end
+		function new.needsRedraw() return true end
 		function new.getWidth( self ) return settings.width end
 		function new.getHeight( self ) return settings.height end
 		function new.getPos( self, v ) return settings.x, settings.y end
@@ -2213,7 +2293,7 @@ function createProgram( options )
 						local sX, sY = s.getPos()
 						local x = event[3] - sX - xOffset + amount + 1
 						local y = event[4] - sY - yOffset + amount
-						if s.getBorderless() then y = y - 1 end
+						if s.getBorderless() then y = y + 1 end
 						
 						if x >= nX and x <= nX + nWidth - 1 and y >= nY and y <= nY + nHeight - 1 then
 							node:checkEvent( event, stage )
@@ -2245,8 +2325,6 @@ function createProgram( options )
 		return new
 	end
 
-	function clone.createBox() end
-
 	function clone.createScene( cfg )
 		local xmlCallbacks = {
 			["button"] = clone.createButton,
@@ -2262,7 +2340,8 @@ function createProgram( options )
 			"checkEvent",
 			"getHeight",
 			"getWidth",
-			"setParent"
+			"setParent",
+			"getParent"
 		}
 		validateRequirements({ "name" }, cfg, false, "The following options must be defined:\n", "\nPlease define these settings when creating your scene.")
 		local sceneDefault = {}
@@ -2275,7 +2354,8 @@ function createProgram( options )
 			nodeFocus = false,
 			tabOrder = {},
 			tabIndex = 1,
-			lastIndex = false
+			lastIndex = false,
+			redraw = {}
 		}
 
 		-- The scene is attached to a stage. The scene _can_ be used on multiple stages.
@@ -2353,7 +2433,7 @@ function createProgram( options )
 					if not node[func] then error("Node ("..xml.label..") missing function: "..func..", check DynaCode Developer Assistance for more information") end
 				end
 				node:setScene( new )
-				node:setParent( self )
+				node:setParent( new )
 				if node.getContains and type(node.getContains) == "function" and node.getContains() then
 					node:handleXML( xml )
 				end
@@ -2379,6 +2459,20 @@ function createProgram( options )
 			else
 				error("dcml file "..tostring( path ).." doesn't exist")
 			end
+		end
+		function new.process( self, stageName, over )
+			local buffer = {}
+			local stage = assert( registryFetch( stageName ), ("Invalid stage: "..tostring(stageName)))
+			for y = 1, stage:getHeight() do buffer[y] = {} for x = 1, stage:getWidth() do buffer[y][x] = {} end end
+			-- Request a node for an update. Each node will return either a new or previous buffer
+			for _, node in pairs( private.nodes ) do
+				node.drawToTable( buffer, stage:getWidth(), stage:getHeight(), 0, stageName )
+			end
+			return buffer
+		end
+
+		function new.getRedrawNodes()
+			return private.redraw
 		end
 
 		local function getFromController( sName )
@@ -2410,6 +2504,10 @@ function createProgram( options )
 		function new.getType() return "scene" end
 
 		function new.getName() return settings.name end
+
+		function new.getTotalEnabled( self )
+			return true
+		end
 
 		function new.replaceWithFile( self, path )
 			local nodes = getXML( path )
@@ -2474,10 +2572,13 @@ function createProgram( options )
 		end
 
 		function new.checkEvent( self, event, stage )
-			if event[1] == "key" and event[2] == keys.tab then nextTabIndex( stage ) elseif event[1] ~= "mouse_click" then
-				for key, node in ipairs( private.nodes ) do
-					node:checkEvent( event, stage )
-				end
+			if event[1] == "key" and event[2] == keys.tab then nextTabIndex( stage ) end
+		end
+
+		function new.getDisabledFilter( self, stage )
+			if settings.disabledFilter then return settings.disabledFilter else
+				local s = assert( registryFetch( stage ), "Invalid stage: "..tostring( stage ))
+				if s then return s:getDisabledFilter() end
 			end
 		end
 
@@ -2524,6 +2625,7 @@ function createProgram( options )
 		local settings = {}
 		setmetatable(settings, {__index=cfg})
 		setmetatable(cfg, {__index=buttonDefaults})
+		local needsRedraw = false
 
 		local function getWidth()
 			if settings.width == "auto" then
@@ -2544,8 +2646,6 @@ function createProgram( options )
 		function new.queueRedraw() queueRedraw() end
 
 		function new.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage )
-			--settings.y = tonumber( settings.y )
-			--settings.height = tonumber( settings.height )
 			local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
 			nOffset = (tonumber(nOffset) and nOffset) or 0
 			-- draw this node to the buffer.
@@ -2553,6 +2653,7 @@ function createProgram( options )
 			-- If the height of the button is greater than 1, calculate the Y at which the text will be drawn
 			if settings.height > 1 then
 				textY = math.floor( settings.height/2 ) + nOffset
+				if util.getBorderless() then textY = textY + 1 end
 			else
 				textY = 1
 			end
@@ -2561,13 +2662,16 @@ function createProgram( options )
 			for cIndex = 1, (settings.text):len() do
 				tText[cIndex] = (settings.text):sub(cIndex, cIndex)
 			end
+
+			local tc, bg = util.getColor( settings.textColor ), util.getColor( settings.backgroundColor )
+
 			for y = 1, settings.height do
 				if y + settings.y - 1 - nOffset < nHeight then
 					for x = 1, getWidth() do
 						if x <= nWidth then
 							tBuffer[y+settings.y-1][x+settings.x-1] = {
-								textColor = util.getColor( settings.textColor ),
-								backgroundColor = util.getColor( settings.backgroundColor ),
+								textColor = tc,
+								backgroundColor = bg,
 								char = " ",
 								nDefined = true
 							}
@@ -2580,6 +2684,8 @@ function createProgram( options )
 				end
 			end
 		end
+
+		function new.needsRedraw() return needsRedraw end
 
 		function new.setScene( self, scene )
 			settings.scene = scene
@@ -2639,6 +2745,7 @@ function createProgram( options )
 
 		function new.checkEvent( self, event, stage )
 			if event[1] == "mouse_click" then
+				needsRedraw = true
 				if type( settings.onClick ) == "function" then
 					settings.onClick( self )
 				elseif type( settings.onClick ) == "string" then
@@ -2680,6 +2787,7 @@ function createProgram( options )
 		local settings = {}
 		setmetatable(settings, {__index=cfg})
 		setmetatable(cfg, {__index=buttonDefaults})
+		local needsRedraw = false
 
 		local function getWidth()
 			return #settings.text
@@ -2694,18 +2802,17 @@ function createProgram( options )
 
 		function new.drawToTable( tBuffer, nWidth, nHeight, nOffset, sStage )
 			if settings.visible then
-				--settings.y = tonumber( settings.y )
-				--settings.height = tonumber( settings.height )
 				local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
 				tText = {}
 				for cIndex = 1, (settings.text):len() do
 					tText[cIndex] = (settings.text):sub(cIndex, cIndex)
 				end
+				local tc, bg = util.getColor( settings.textColor ), util.getColor( settings.backgroundColor )
 				for x = 1, getWidth() do
 					if x <= nWidth and settings.y <= nHeight then
 						tBuffer[settings.y][x+settings.x-1] = {
-							textColor = util.getColor( settings.textColor ),
-							backgroundColor = util.getColor( settings.backgroundColor ),
+							textColor = tc,
+							backgroundColor = bg,
 							char = tText[x] or " ",
 							nDefined = true
 						}
@@ -2713,6 +2820,8 @@ function createProgram( options )
 				end
 			end
 		end
+
+		function new.needsRedraw() return needsRedraw end
 
 		function new.setScene( self, scene )
 			settings.scene = scene
@@ -2723,7 +2832,7 @@ function createProgram( options )
 		end
 
 		function new.setParent( self, v ) settings.parent = v end
-		function new.getParent() return private.parent end
+		function new.getParent() return settings.parent end
 
 		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
@@ -2748,15 +2857,7 @@ function createProgram( options )
 		function new.getText( self ) return settings.text end
 
 		function new.checkEvent( self, event, p1, p2, p3, p4 )
-			if event == "mouse_click" then
-				if type( settings.onClick ) == "function" then
-					settings.onClick( self )
-				elseif type( settings.onClick ) == "string" then
-					if (settings.onClick):sub(1,1) == "#" then
-						settings.scene.runFromController( ( settings.onClick ):sub(2), self )
-					end
-				end
-			end
+			
 		end
 
 		function new.getName() return settings.name end
@@ -2784,9 +2885,13 @@ function createProgram( options )
 			backgroundColor = "lightGray",
 			unfocusedTextColor = "white",
 			unfocusedBackgroundColor = "gray",
+			disabledTextColor = "black",
+			disabledBackgroundColor = "lightGray",
 			focused = false,
 			enabled = true,
 			visible = true,
+			xCenter = false,
+			yCenter = false,
 			value = "",
 			onSubmit = false,
 			onKeyPressed = false,
@@ -2794,11 +2899,21 @@ function createProgram( options )
 			onFocus = false,
 			onBlur = false,
 			name = false,
-			tabIndex = 1
+			tabIndex = 1,
+			limit = false
 		}
-		local new, private, settings = {}, { scene = false, position = 0 }, {}
+		local new, private, settings = {}, { scene = false, position = 0}, {}
 		setmetatable( cfg, {__index=inputDefaults})
 		setmetatable( settings, {__index=cfg})
+
+		if settings.limit then
+			local limit = tonumber( settings.limit )
+			if not limit and string.lower( settings.limit ) ~= "inf" and string.lower( settings.limit ) ~= "true" and string.lower( settings.limit ) ~= "false" then
+				error("Input limit invalid. Limit must be either: true, false or a number")
+			end
+			if limit then settings.limit = limit end
+		end
+		log( tostring(settings.limit), "w" )
 
 		local inputCallbacks = {
 			["submit"] = "onSubmit",
@@ -2807,6 +2922,8 @@ function createProgram( options )
 			["blur"] = "onBlur",
 			["focus"] = "onFocus"
 		}
+
+		local needsRedraw = false
 
 		local function runCallback(self, name, tPass, keepPacked)
 
@@ -2848,14 +2965,33 @@ function createProgram( options )
 				local util = assert( registryFetch( sStage ), "Invalid stage: "..tostring( sStage ) )
 				local tText = {}
 				for charIndex = 1, string.len( settings.value ) do if settings.replace then tText[charIndex] = settings.replace:sub(1,1) else tText[charIndex] = string.sub( settings.value, charIndex, charIndex ) end end
+				local charStart = 1
+				if private.position + 2 > settings.width then 
+					if type(settings.limit) ~= "number" then
+						if ( type( settings.limit ) == "string" and string.lower( settings.limit ) == "inf" ) or #settings.value ~= settings.width then
+							charStart = private.position - settings.width + 2
+						end
+					elseif type( settings.limit ) == "number" then
+						if #settings.value == settings.limit then
+							charStart = private.position - settings.width + 1
+						else
+							charStart = private.position - settings.width + 2
+						end
+					end
+				end
+
 				local tc, bg = settings.textColor, settings.backgroundColor
-				if not settings.focused then tc = settings.unfocusedTextColor bg = settings.unfocusedBackgroundColor end
+				if not settings.focused and settings.enabled then tc = settings.unfocusedTextColor bg = settings.unfocusedBackgroundColor elseif not settings.enabled then
+					tc = settings.disabledTextColor
+					bg = settings.disabledBackgroundColor
+				end
+				tc = util.getColor( tc ), util.getColor( bg )
 				for x = 1, settings.width do
 					if x <= nWidth and settings.y <= nHeight then
 						tBuffer[settings.y][x+settings.x-1] = {
-							textColor = util.getColor( tc ),
-							backgroundColor = util.getColor( bg ),
-							char = tText[x] or " ",
+							textColor = tc,
+							backgroundColor = bg,
+							char = tText[charStart + x - 1] or " ",
 							nDefined = true
 						}
 					end
@@ -2863,7 +2999,11 @@ function createProgram( options )
 			end
 		end
 
-		function new.getPos() return settings.x, settings.y end
+		function new.needsRedraw() return needsRedraw end
+
+		function new.getPos()
+			return settings.x, settings.y
+		end
 		function new.setPos( self, x, y ) settings.x, settings.y = x, y end
 
 		function new.getHeight() return 1 end
@@ -2889,41 +3029,36 @@ function createProgram( options )
 
 					local x = event[3] - sX - xOffset + amount + 1
 					local y = event[4] - sY - yOffset + amount
+					if stage.getBorderless() then y = y + 1 end
 
 					if x >= settings.x and x <= settings.x + settings.width - 1 and y == settings.y then
-						if private.scene then
+						if private.scene and settings.enabled then
 							--# Add focus
 							runCallback( self, "focus", event )
 							settings.focused = true
 							stage:getScene():setTabIndex( self )
 							stage:getScene():setNodeFocus( self )
-							stage:setRedrawStatus( true )
-							stage:getScene():setRedrawStatus( true )
-						else error("Scene object not found") end
+						end
 					else
-						--error( x .. ", " .. y .. ", " .. settings.x .. ", " .. settings.y )
-						if private.scene then--# Remove focus
+						if private.scene then
+							--# Remove focus
 							runCallback( self, "blur", event )
 							settings.focused = false
 							stage:getScene():setTabIndex( self )
 							private.scene:setNodeFocus( false )
-							stage:setRedrawStatus( true )
-							stage:getScene():setRedrawStatus( true )
 						else error("Scene object not found") end
 					end
 				end
 			elseif event[1] == "char" then
 				runCallback( self, "char", event )
-				private.scene:setRedrawStatus( true )
-				stage:setRedrawStatus( true )
-				if settings.focused and #settings.value < settings.width then
-					settings.value = string.sub( settings.value, 1, private.position ) .. event[2] .. string.sub( settings.value, private.position + 1 )
-					private.position = private.position + 1
+				if settings.focused then
+					if ( type( settings.limit ) == "number" and #settings.value < settings.limit ) or ( type( settings.limit ) == "string" and settings.limit == "inf" ) or ( type( settings.limit ) ~= "string" and type( settings.limit ) ~= "number" and #settings.value < settings.width ) then
+						settings.value = string.sub( settings.value, 1, private.position ) .. event[2] .. string.sub( settings.value, private.position + 1 )
+						private.position = private.position + 1
+					end
 				end
 			elseif event[1] == "key" then
 				runCallback( self, "key", event )
-				private.scene:setRedrawStatus( true )
-				stage:setRedrawStatus( true )
 				if settings.focused then
 					if event[2] == keys.backspace then
 						if #settings.value > 0 and private.position > 0 then
@@ -2942,7 +3077,6 @@ function createProgram( options )
 					elseif event[2] == keys["end"] then
 						private.position = #settings.value
 					elseif event[2] == keys.enter then
-						--# onsubmit callback here.
 						runCallback( self, "submit" )
 					end
 				end
@@ -3002,22 +3136,27 @@ function createProgram( options )
 			runCallback( self, "blur", event )
 			settings.focused = false
 			if private.scene.getNodeFocus() == self then private.scene:setNodeFocus( false ) end
-			stage:setRedrawStatus( true )
-			stage:getScene():setRedrawStatus( true )
-			--stage:getScene():setTabIndex( self )
 		end
 		function new.focus( self, stage )
+			if not settings.enabled then return end
 			local stage = assert( registryFetch( stage ), "Invalid stage: "..stage)
 			runCallback( self, "focus", event )
 			settings.focused = true
 			private.scene:setNodeFocus( self )
-			stage:setRedrawStatus( true )
-			stage:getScene():setRedrawStatus( true )
-			--stage:getScene():setTabIndex( self )
 		end
 
 		function new.getValue() return settings.value end
 		function new.setValue( self, v ) settings.value = v private.position = #settings.value end
+
+		function new.getAnimationProperty( property )
+			if settings[property] then return settings[property] else error("Cannot find: "..tostring( property ) .. " on pane", 2) end
+		end
+
+		function new.setAnimationProperty( target, setting, value )
+			if settings[setting] then settings[setting] = value else error(setting.." not found in pane object") end
+		end
+
+		function new.getType() return"input" end
 
 		return new
 	end
@@ -3025,6 +3164,8 @@ function createProgram( options )
 	function clone.getStageFromRegistry( name )
 		return registryFetch( name )
 	end
+
+	local programRunning = true
 
 	local function begin( callback )
 		local activeEvent = {
@@ -3101,7 +3242,7 @@ function createProgram( options )
 			end
 		end
 		local function loop()
-			while true do
+			while programRunning do
 				local event = { os.pullEventRaw() }
 				if event[1] == "program_stop" and event[2] == program.name then
 					break
@@ -3133,7 +3274,9 @@ function createProgram( options )
 				end
 				reorderRequests = {}
 
-				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then drawAll() end
+				if true or event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" then 
+					drawAll() 
+				end
 
 				local function cbSet( aStage, scene )
 
@@ -3169,6 +3312,10 @@ function createProgram( options )
 				end
 			end
 		end
+		if #objects.stages <= 0 then
+			log("Cannot start windows loop, no stages open.", "w")
+			return false
+		end
 		-- Draw every stage
 		drawAll()
 		if callback and type( callback ) == "function" then
@@ -3178,7 +3325,7 @@ function createProgram( options )
 		end
 	end
 
-	function clone.stopWindows() os.queueEvent("program_stop", program.name) end
+	function clone.stopWindows() programRunning = false end -- uses a variable here because any callbacks that attempts to program.stopWindows() AND use another function that waits for a specific event will eat the event thrown stopping the program from closing.
 
 	function clone.registerEvent( event, callback, id )
 		if not tEvents[event] then tEvents[event] = {} end
@@ -3228,13 +3375,14 @@ function createProgram( options )
 	end
 
 	function clone.startWindows( callback )
+		runningProgram = true
 		local function cPrint( text, y, color )
 			if color then term.setTextColor( color ) end
 			term.setCursorPos( math.ceil( termX/2-(#text/2) ), y )
 			term.clearLine()
 			write( text )
 		end
-		-- starts each windows event loop.
+		-- Starts each windows event loop.
 		-- When a stage is destroyed, it will be stopped and must be "rebuilt" in order to function again.
 		if program.catchErrors then
 			local ok, err = pcall(function() begin( callback ) restore() end)

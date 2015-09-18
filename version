@@ -1,7 +1,7 @@
 {
-build = 42,
+build = 44,
 version = 1,
 changes = {
-		"* Fixed click detection in panes"
+		"* Reduced calls to getColor, input lag reduced."
 	}
 }
