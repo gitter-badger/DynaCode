@@ -444,20 +444,20 @@ function createProgram( options )
 			name = "_UNFOCUSED",
 			tbl = {
 				["white"] = colors.lightGray,
-				["orange"] = colors.lightGray,
+				["orange"] = colors.gray,
 				["magenta"] = colors.lightGray,
 				["lightBlue"] = colors.lightGray,
-				["yellow"] = colors.gray,
-				["lime"] = colors.lightGray,
+				["yellow"] = colors.lightGray,
+				["lime"] = colors.gray,
 				["pink"] = colors.lightGray,
 				["gray"] = colors.gray,
 				["lightGray"] = colors.lightGray,
-				["cyan"] = colors.lightGray,
-				["purple"] = colors.lightGray,
-				["blue"] = colors.lightGray,
-				["brown"] = colors.lightGray,
-				["green"] = colors.lightGray,
-				["red"] = colors.lightGray,
+				["cyan"] = colors.gray,
+				["purple"] = colors.gray,
+				["blue"] = colors.gray,
+				["brown"] = colors.gray,
+				["green"] = colors.gray,
+				["red"] = colors.gray,
 				["black"] = colors.gray
 			}
 		}
@@ -1943,13 +1943,15 @@ function createProgram( options )
 
 		function new.setMinWidth( self, v ) settings.minWidth = v end
 		function new.getMinWidth() return settings.minWidth end
+		local dragging = false
+		local lastMoveX, lastMoveY = false, false
 
 		local function handleMouseClick( self, event )
 			local button, nX, nY = event[2], event[3], event[4]
 			local offset = (function() if settings.borderless then return 0 else return 1 end end)()
 			if nX < settings.x or nX > settings.x + settings.width - 1 or nY < settings.y or nY > settings.y + settings.height + offset then return end
 			local onNode = false
-			settings.lastClickX, settings.lastClickY = nX, nY
+			--settings.lastClickX, settings.lastClickY = nX, nY
 			if settings.scene and type( settings.scene ) == "table" and settings.scene.getType and settings.scene.getType() == "scene" then
 				local nodes = settings.scene.getNodes()
 				for i = #nodes, 1, -1 do
@@ -1980,7 +1982,25 @@ function createProgram( options )
 			else
 				-- however, if the click was not on a node or there is no scene, check for window functions
 				if button == 1 and nX > settings.x and nX < settings.x + settings.width and nY == settings.y and not settings.borderless then
-					if nX == settings.x + settings.width - 1 and settings.closeButton then close() end
+					if nX == settings.x + settings.width - 1 and settings.closeButton then close() return end
+				end
+				if button == 1 and nX >= settings.x and nX <= settings.x + settings.width and nY == settings.y then
+					-- Clicked on top bar, set to move mode.
+					dragging = {
+						mode = "move",
+						event = event,
+						target = self,
+						x = event[3],
+						y = event[4]
+					}
+					lastMoveX, lastMoveY = nX, nY
+				elseif button == 1 and nX == settings.x + settings.width - 1 and nY == settings.y + settings.height then
+					dragging = {
+						mode = "resize",
+						event = event,
+						target = self
+					}
+					lastResizeX, lastResizeY = nX, nY
 				end
 			end
 		end
@@ -1992,40 +2012,39 @@ function createProgram( options )
 		local function handleMouseDrag( self, event )
 			local button, nX, nY = event[2], event[3], event[4]
 			local offset = (function() if not settings.borderless then return 0 else return 1 end end)()
-			if settings.lastClickX >= settings.x and settings.lastClickX <= settings.x + settings.width and settings.lastClickY == settings.y and settings.moveable and settings.active then
-				if nX < settings.lastClickX and (settings.allowOffScreen or settings.x - 1 > 0) then
-					settings.x = settings.x - 1
+			if type( dragging ) == "table" and dragging.mode == "move" and settings.moveable and settings.active then
+				if nX < lastMoveX and (settings.allowOffScreen or settings.x - 1 > 0) then
+					settings.x = settings.x + event[3] - lastMoveX
 					runCallback("reposition")
-				elseif nX > settings.lastClickX and ( settings.allowOffScreen or settings.x + settings.width - 1 < termX ) then
-					settings.x = settings.x + 1
-					runCallback("reposition")
-				end
-				if nY < settings.lastClickY and (settings.allowOffScreen or settings.y - 1 > 0) then
-					settings.y = settings.y - 1
-					runCallback("reposition")
-				elseif nY > settings.lastClickY and (settings.allowOffScreen or nY + settings.height - 1 - offset < termY) then
-					settings.y = settings.y + 1
+				elseif nX > lastMoveX and ( settings.allowOffScreen or settings.x + settings.width - 1 < termX ) then
+					settings.x = settings.x + event[3] - lastMoveX
 					runCallback("reposition")
 				end
-				settings.lastClickX, settings.lastClickY = nX, nY
-			elseif settings.lastClickX == settings.x + settings.width - 1 and settings.lastClickY == settings.y + settings.height - offset then
+				if nY < lastMoveY and (settings.allowOffScreen or settings.y - 1 > 0) then
+					settings.y = settings.y + event[4] - lastMoveY
+					runCallback("reposition")
+				elseif nY > lastMoveY and (settings.allowOffScreen or nY + settings.height - 1 - offset < termY) then
+					settings.y = settings.y + event[4] - lastMoveY
+					runCallback("reposition")
+				end
+				lastMoveX, lastMoveY = nX, nY
+			elseif type( dragging ) == "table" and dragging.mode == "resize" and settings.active then
 				local oW, oH = settings.width, settings.height
-				if nX < settings.lastClickX and settings.width - 1 > 0 and settings.width - 1 >= settings.minWidth then
-					settings.width = settings.width - 1
-				elseif nX > settings.lastClickX and settings.x + settings.width - 1 < termX and settings.width < settings.maxWidth then
-					settings.width = settings.width + 1
+				if nX < lastResizeX and settings.width - 1 > 0 and settings.width - 1 >= settings.minWidth then
+					settings.width = settings.width + event[3] - lastResizeX
+				elseif nX > lastResizeX and settings.x + settings.width - 1 < termX and settings.width < settings.maxWidth then
+					settings.width = settings.width + event[3] - lastResizeX
 				end
-				if nY < settings.lastClickY and settings.height - 1 > 0 and settings.height > settings.minHeight then
-					settings.height = settings.height - 1
-				elseif nY > settings.lastClickY and settings.y + settings.height - 1 - offset < termY and settings.height < settings.maxHeight then
-					settings.height = settings.height + 1
+				if nY < lastResizeY and settings.height - 1 > 0 and settings.height > settings.minHeight then
+					settings.height = settings.height + event[4] - lastResizeY
+				elseif nY > lastResizeY and settings.y + settings.height - 1 - offset < termY and settings.height < settings.maxHeight then
+					settings.height = settings.height + event[4] - lastResizeY
 				end
-				settings.lastClickX, settings.lastClickY = nX, nY
+				lastResizeX, lastResizeY = nX, nY
 				if settings.width ~= oW or settings.height ~= oH then
 					runCallback("resize")
 					resetBuffer()
 					cache.needsRedraw = true
-					cache.redrawNodes = true
 				end
 			end
 		end
@@ -2037,6 +2056,7 @@ function createProgram( options )
 		end
 
 		local function handleMouseUp( self, event )
+			if dragging then dragging = false end
 			if settings.scene then
 				for _, node in ipairs( settings.scene:getNodes() ) do
 					node:checkEvent( event, settings.name )

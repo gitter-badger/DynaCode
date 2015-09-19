@@ -1,7 +1,7 @@
 {
-build = 48,
+build = 49,
 version = 1,
 changes = {
-		"* Allowed panes to be set at negative Y ordinate"
+		"* Bug fixes"
 	}
 }
