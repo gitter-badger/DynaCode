@@ -401,8 +401,9 @@ function createProgram( options )
         if apiCfg.keepUpToDate then
             -- check for updates now
             checkAndProceed()
-            updateChecked = true
         end
+
+        updateChecked = true
 
     end
     
@@ -1357,7 +1358,6 @@ function createProgram( options )
 
                                         nodeMap[y][x] = nodeID
                                     elseif layerX == nodeID and not visible then
-                                        log("pixel nulled! FromID: "..tostring( nodeID ))
                                         nodeMap[y][x] = 0
                                     end
                                 end
@@ -1381,7 +1381,6 @@ function createProgram( options )
                         buffer[y][x][1] = false
                         buffer[y][x][2] = false
                         buffer[y][x][3] = false
-                        log(x..", "..y..", nulled!")
                     end
                 end
             end
