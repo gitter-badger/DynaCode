@@ -1,7 +1,28 @@
 {
-build = 49,
-version = 1,
-changes = {
-		"* Bug fixes"
-	}
+    build = 50,
+    version = 0,
+    stable = false,
+    changes = {
+        "* Fixed pane click detection (nodes behind will no longer respond to clicks)",
+        "* Fixed animation jumping (when step is not same as current jump)",
+        "+ Added input placeholder (options: placeholder, placeholderFocusTextColor, placeholderBlurredTextColor, placeholderHideOnFocus",
+        "- Removed processBufferQueue, drawMerge functions",
+        "+ Added stage node mapping",
+        "+ Added stage location mapping",
+        "* Huge buffer related optimizations",
+        "* Fixed event repetition",
+        "* Fixed animation thread deletion",
+        "* Fixed custom event registration",
+        "* Sped up coroutine manager",
+        "* Prevented nodes from redrawing every buffer call",
+        "* Adjusted log to include information about DynaCode & program instance",
+        "* Fixed click detection. Nodes behind panes can no longer be clicked",
+        "+ Pane node mapping",
+        "+ Added custom remapping",
+        "* Fixed animation remap issues",
+        "* Nodes inside of panes can now be animated correctly",
+        "* Panes and their inner nodes can be animated correctly",
+        "+ Added ability to create nodes in realtime and add them to panes",
+        "* Fixed adding nodes to raw scene"
+    }
 }
