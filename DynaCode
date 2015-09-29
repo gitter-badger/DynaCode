@@ -1466,7 +1466,6 @@ function createProgram( options )
         end
 
         local function draw()
-            log("stageCanvas redraw", "w")
             term.redirect( canvas )
             local oX, oY = term.getCursorPos()
             local emptyString = rep( " ", settings.width)
